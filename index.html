@@ -34,6 +34,15 @@ main{padding-bottom:60px}
   padding-left:6vw;opacity:0;transition:opacity .12s ease;pointer-events:none}
 .r.on .m{opacity:1}
 .r.on .w{color:var(--acc)}
+.mk{flex:0 0 auto;display:flex;flex-direction:column;gap:4px;margin-left:6px}
+.mk button{width:30px;height:24px;padding:0;font-size:13px;line-height:1;color:var(--dim);border-radius:7px}
+.mk button.on{color:#fff;border-color:transparent}
+.mk button.no.on{background:#d14343}
+.mk button.yes.on{background:#2f8f5b}
+.r.bad{background:rgba(209,67,67,.07)}
+.r.bad .w{color:#d14343}
+.r.good{background:rgba(47,143,91,.06)}
+.r.good .w{color:#2f8f5b}
 .empty{padding:40px 20px;text-align:center;color:var(--dim);font-size:14px;line-height:1.9}
 dialog{border:none;border-radius:14px;padding:0;background:var(--bar);color:var(--fg);max-width:92vw;width:420px}
 dialog::backdrop{background:#0007}
@@ -64,6 +73,7 @@ dialog::backdrop{background:#0007}
     <button id="btnAll" title="全部显示/隐藏">全显</button>
     <button id="btnUpd" title="重新拉取词表">更新</button>
     <button id="btnTheme" title="深浅色">◐</button>
+    <button id="btnBad" title="复制本组错词">复制错词</button>
     <button id="btnRule" title="本次抽词规则">规则</button>
     <button id="btnMore" title="备份/导出">⋯</button>
   </div>
@@ -78,6 +88,10 @@ dialog::backdrop{background:#0007}
     <div class="row">
       <button id="btnExportCur">导出本组</button>
       <button id="btnExportAll">导出全部</button>
+    </div>
+    <div class="row">
+      <button id="btnCopyAll">复制本组全部</button>
+      <button id="btnCopyToday">复制今天错词</button>
     </div>
     <div class="row">
       <button id="btnBackup">备份</button>
@@ -103,6 +117,8 @@ dialog::backdrop{background:#0007}
 
 <script>
 "use strict";
+const APP_VER = "1.3";
+const APP_BUILT = "2026-11-04";
 const DATA_URL = "words.json";
 const K_DATA = "ci.data", K_SETS = "ci.sets", K_PREFS = "ci.prefs", K_SEQ = "ci.seq";
 const $ = id => document.getElementById(id);
@@ -158,10 +174,12 @@ function renderMeta() {
   const upd = DATA.updated ? cn(DATA.updated) : "—";
   const lb = (DATA.latest && DATA.latest.date) ? "错词批次 " + cn(DATA.latest.date) : "";
   const set = curKey && SETS[curKey] ? SETS[curKey] : null;
-  let s = `<span>词表 ${n} 词 · 更新 ${upd}</span><span>${lb}</span>`;
+  let s = `<span>v${APP_VER}</span><span>词表 ${n} 词 · 更新 ${upd}</span><span>${lb}</span>`;
   if (set) {
     const on = document.querySelectorAll(".r.on").length;
-    s += `<span>本组 ${set.words.length} 词 · 已点开 ${on}</span>`;
+    const bad = document.querySelectorAll(".r.bad").length;
+    const good = document.querySelectorAll(".r.good").length;
+    s += `<span>本组 ${set.words.length} 词 · 点开 ${on} · 错 ${bad} · 对 ${good}</span>`;
   }
   m.innerHTML = s;
 }
@@ -270,14 +288,36 @@ function render() {
   const set = curKey && SETS[curKey];
   if (!set) { box.innerHTML = '<div class="empty">选个日期，或者点「抽词」<br>抽出来的词会自动存在手机上</div>'; renderMeta(); return; }
   const byW = new Map(); ((DATA && DATA.words) || []).forEach(w => byW.set(w.w, w));
+  const marks = set.marks || {};
   const html = set.words.map(w => {
     const o = byW.get(w);
     const mean = o ? ((o.p || "") + (o.d || "")) : "（词表里没有这个词）";
-    return '<div class="r" data-w="' + w + '"><div class="w">' + w + '</div><div class="m">' + mean + '</div></div>';
+    const m = marks[w] || 0;
+    const cls = "r" + (m === -1 ? " bad" : m === 1 ? " good" : "");
+    return '<div class="' + cls + '" data-w="' + w + '">' +
+      '<div class="w">' + w + '</div><div class="m">' + mean + '</div>' +
+      '<div class="mk"><button class="no' + (m === -1 ? " on" : "") + '" data-k="-1">✗</button>' +
+      '<button class="yes' + (m === 1 ? " on" : "") + '" data-k="1">✓</button></div></div>';
   }).join("");
   box.innerHTML = html || '<div class="empty">这组是空的</div>';
   box.querySelectorAll(".r").forEach(el => {
     el.addEventListener("click", () => { el.classList.toggle("on"); renderMeta(); });
+    el.querySelectorAll(".mk button").forEach(b => {
+      b.addEventListener("click", ev => {
+        ev.stopPropagation();
+        const w = el.dataset.w, k = +b.dataset.k;
+        const st = curSet();
+        st.marks = st.marks || {};
+        const now = st.marks[w] === k ? 0 : k;
+        if (now === 0) delete st.marks[w]; else st.marks[w] = now;
+        store.set(K_SETS, SETS);
+        el.classList.remove("bad", "good");
+        el.querySelectorAll(".mk button").forEach(x => x.classList.remove("on"));
+        if (now === -1) { el.classList.add("bad"); el.querySelector(".mk .no").classList.add("on"); }
+        if (now === 1) { el.classList.add("good"); el.querySelector(".mk .yes").classList.add("on"); }
+        renderMeta();
+      });
+    });
   });
   window.scrollTo({ top: 0 });
   renderMeta();
@@ -305,6 +345,21 @@ function download(name, text, type) {
   a.href = URL.createObjectURL(b); a.download = name; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 }
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); toast("已复制 " + t.split("\n").length + " 个词"); return true; }
+  catch (e) {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = t; ta.style.position = "fixed"; ta.style.opacity = "0";
+      document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove();
+      toast("已复制 " + t.split("\n").length + " 个词"); return true;
+    } catch (e2) { toast("复制失败，长按手动选择"); return false; }
+  }
+}
+function badWords(ofSet) {
+  const s = ofSet, m = (s && s.marks) || {};
+  return s.words.filter(w => m[w] === -1);
+}
 function setToText(s) {
   const byW = new Map(); ((DATA && DATA.words) || []).forEach(w => byW.set(w.w, w));
   return s.words.map(w => { const o = byW.get(w); return w + "\t" + (o ? (o.p || "") + (o.d || "") : ""); }).join("\n");
@@ -325,6 +380,13 @@ $("btnFsPlus").addEventListener("click", () => { PREFS.fs = Math.min(46, PREFS.f
 $("btnFsMinus").addEventListener("click", () => { PREFS.fs = Math.max(16, PREFS.fs - 2); applyPrefs(); store.set(K_PREFS, PREFS); });
 $("btnTheme").addEventListener("click", () => { PREFS.theme = PREFS.theme === "dark" ? "light" : "dark"; applyPrefs(); store.set(K_PREFS, PREFS); });
 $("btnUpd").addEventListener("click", async () => { toast("更新中…"); const ok = await loadData(true); if (ok) toast("词表已更新 · " + cn(DATA.updated)); });
+$("btnBad").addEventListener("click", () => {
+  const s = curSet();
+  if (!s) { toast("先抽一次词"); return; }
+  const bad = badWords(s);
+  if (!bad.length) { toast("这组还没标错的词（点每行右边的 ✗）"); return; }
+  copyText(bad.join("\n"));
+});
 $("btnRule").addEventListener("click", () => {
   const s = curSet();
   if (!s) { toast("先抽一次词"); return; }
@@ -349,7 +411,8 @@ $("btnRule").addEventListener("click", () => {
       "7. 补位：以上不够目标数量，就从 B 档按考频补；同一词只出现一次。",
       "8. 同一天抽第 2、第 3 次时，当天已经抽过的词不会再出，除非剩余词不够。"
     ].map(x => x).join("<br>") +
-    "<br><br><b>字号</b> " + PREFS.fs + "px　<b>词表</b> " + (DATA ? DATA.words.length + " 词，更新于 " + cn(DATA.updated) : "未加载");
+    "<br><br><b>标记</b> 每行右边 ✗ 记错、✓ 记对，顶部「复制错词」一键复制本组错词<br>" +
+    "<br><b>版本</b> 网站 v" + APP_VER + "（" + cn(APP_BUILT) + "）<br><b>字号</b> " + PREFS.fs + "px　<b>词表</b> " + (DATA ? DATA.words.length + " 词，更新于 " + cn(DATA.updated) : "未加载");
   $("dlgRule").showModal();
 });
 $("btnRuleClose").addEventListener("click", () => $("dlgRule").close());
@@ -357,6 +420,7 @@ $("btnMore").addEventListener("click", () => {
   const s = curSet();
   const size = (JSON.stringify(SETS).length / 1024).toFixed(1);
   $("info").innerHTML =
+    "网站版本 v" + APP_VER + "（" + cn(APP_BUILT) + " 构建）<br>" +
     "词表 " + (DATA ? DATA.words.length : 0) + " 词，更新于 " + (DATA && DATA.updated ? cn(DATA.updated) : "—") + "<br>" +
     "已存 " + Object.keys(SETS).length + " 组抽词（" + size + " KB）<br>" +
     "当前：" + (s ? cn(s.date) + " 第" + s.n + "次 · " + s.words.length + "词 · 目标" + s.target : "无") + "<br>" +
@@ -375,6 +439,16 @@ $("btnExportAll").addEventListener("click", () => {
     const s = SETS[k]; return "=== " + cn(s.date) + " 第" + s.n + "次（" + s.words.length + "词） ===\n" + setToText(s);
   }).join("\n\n"));
   toast("已导出全部");
+});
+$("btnCopyAll").addEventListener("click", () => {
+  const s = curSet(); if (!s) { toast("没有可复制的组"); return; }
+  copyText(s.words.join("\n"));
+});
+$("btnCopyToday").addEventListener("click", () => {
+  const day = todayStr(), out = [];
+  Object.values(SETS).forEach(s => { if (s.date === day) badWords(s).forEach(w => { if (out.indexOf(w) < 0) out.push(w); }); });
+  if (!out.length) { toast("今天还没有标错的词"); return; }
+  copyText(out.join("\n"));
 });
 $("btnBackup").addEventListener("click", () => {
   download("抽词备份-" + todayStr() + ".json", JSON.stringify({ v: 1, ts: Date.now(), prefs: PREFS, sets: SETS }, null, 1), "application/json");
