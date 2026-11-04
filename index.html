@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#111418">
+<title>抽词复习</title>
+<style>
+:root{
+  --fs:26;
+  --bg:#f6f6f4; --fg:#14171a; --dim:#5d6b7a; --line:#e2e2dd; --bar:#fbfbf9; --acc:#2f6f4f;
+}
+html[data-theme="dark"]{
+  --bg:#111418; --fg:#e9edf1; --dim:#8ab4d8; --line:#252a31; --bar:#171b21; --acc:#7fd1a8;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--fg);
+  font-family:-apple-system,system-ui,"PingFang SC","Noto Sans SC",sans-serif}
+header{position:sticky;top:0;z-index:20;background:var(--bar);border-bottom:1px solid var(--line);
+  padding:8px 10px calc(6px + env(safe-area-inset-top)/3);padding-top:calc(8px + env(safe-area-inset-top))}
+.l1{display:flex;gap:6px;align-items:center}
+.l2{display:flex;gap:6px;align-items:center;margin-top:6px;flex-wrap:wrap}
+select,button{font:inherit;font-size:14px;color:var(--fg);background:transparent;border:1px solid var(--line);
+  border-radius:9px;padding:7px 9px;line-height:1.2}
+button:active{background:var(--line)}
+#sel{flex:1;min-width:0}
+#btnDraw{background:var(--acc);color:#fff;border-color:transparent;font-weight:600;padding:8px 16px}
+.tiny{font-size:12px;color:var(--dim);padding:5px 8px}
+#meta{font-size:12px;color:var(--dim);margin-top:6px;display:flex;gap:10px;flex-wrap:wrap}
+main{padding-bottom:60px}
+.r{display:flex;align-items:flex-start;padding:11px 12px 11px 14px;border-bottom:1px solid var(--line);cursor:pointer}
+.w{flex:0 0 auto;width:42%;font-size:calc(var(--fs)*1px);font-weight:650;letter-spacing:.2px;word-break:break-word}
+.m{flex:1;min-width:0;font-size:calc(var(--fs)*0.6px);line-height:1.45;color:var(--dim);
+  padding-left:6vw;opacity:0;transition:opacity .12s ease;pointer-events:none}
+.r.on .m{opacity:1}
+.r.on .w{color:var(--acc)}
+.empty{padding:40px 20px;text-align:center;color:var(--dim);font-size:14px;line-height:1.9}
+dialog{border:none;border-radius:14px;padding:0;background:var(--bar);color:var(--fg);max-width:92vw;width:420px}
+dialog::backdrop{background:#0007}
+.pad{padding:14px 16px}
+.pad h3{margin:2px 0 12px;font-size:15px}
+.pad .row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.pad button{flex:1;min-width:120px;padding:10px}
+.note{font-size:12px;color:var(--dim);line-height:1.7}
+.toast{position:fixed;left:50%;bottom:74px;transform:translateX(-50%);background:#000c;color:#fff;
+  padding:9px 15px;border-radius:20px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:50}
+.toast.on{opacity:1}
+</style>
+</head>
+<body>
+<header>
+  <div class="l1">
+    <select id="sel" title="选择日期/批次"></select>
+    <select id="tgt" title="本次抽词量">
+      <option value="25">25</option><option value="50">50</option>
+      <option value="75" selected>75</option><option value="100">100</option>
+      <option value="150">150</option>
+    </select>
+    <button id="btnDraw">抽词</button>
+  </div>
+  <div class="l2">
+    <button id="btnFsMinus" title="字号变小">A−</button>
+    <button id="btnFsPlus" title="字号变大">A+</button>
+    <button id="btnAll" title="全部显示/隐藏">全显</button>
+    <button id="btnUpd" title="重新拉取词表">更新</button>
+    <button id="btnTheme" title="深浅色">◐</button>
+    <button id="btnMore" title="备份/导出">⋯</button>
+  </div>
+  <div id="meta"></div>
+</header>
+<main id="list"></main>
+<div class="toast" id="toast"></div>
+
+<dialog id="dlg">
+  <div class="pad">
+    <h3>数据</h3>
+    <div class="row">
+      <button id="btnExportCur">导出本组</button>
+      <button id="btnExportAll">导出全部</button>
+    </div>
+    <div class="row">
+      <button id="btnBackup">备份</button>
+      <button id="btnRestore">恢复</button>
+      <button id="btnClear">清空缓存</button>
+    </div>
+    <div class="note" id="info"></div>
+    <div class="row" style="margin-top:14px">
+      <button id="btnClose" style="flex:1">关闭</button>
+    </div>
+  </div>
+</dialog>
+<input type="file" id="fileIn" accept=".json" hidden>
+
+<script>
+"use strict";
+const DATA_URL = "words.json";
+const K_DATA = "ci.data", K_SETS = "ci.sets", K_PREFS = "ci.prefs", K_SEQ = "ci.seq";
+const $ = id => document.getElementById(id);
+
+/* ---------- 存储 ---------- */
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { toast("存储失败：" + e.message); } },
+  del(k) { localStorage.removeItem(k); }
+};
+
+let DATA = store.get(K_DATA, null)?.payload || null;
+let SETS = store.get(K_SETS, {});      // "2026-11-04|1" -> {date,n,target,words:[...]}
+let PREFS = store.get(K_PREFS, { fs: 26, theme: "light" });
+let curKey = null;                      // 当前查看的组
+
+/* ---------- 小工具 ---------- */
+let toastTimer = null;
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.classList.add("on");
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("on"), 1600);
+}
+const pad2 = n => String(n).padStart(2, "0");
+const todayStr = () => { const d = new Date(); return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()); };
+const cn = s => { const a = s.split("-"); return (+a[1]) + "月" + (+a[2]) + "日"; };
+const dayShift = (s, k) => { const a = s.split("-").map(Number); const d = new Date(a[0], a[1] - 1, a[2]); d.setDate(d.getDate() + k);
+  return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()); };
+
+function hash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+function lcg(seed) { let s = seed >>> 0; return function () { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 4294967296; }; }
+
+/* ---------- 数据 ---------- */
+async function loadData(force) {
+  let ok = false;
+  try {
+    const r = await fetch(DATA_URL + "?t=" + Date.now(), { cache: "no-store" });
+    if (r.ok) {
+      DATA = await r.json();
+      store.set(K_DATA, { ts: Date.now(), payload: DATA });
+      ok = true;
+    }
+  } catch (e) { /* 离线就用缓存 */ }
+  if (!ok && DATA) toast("离线：用手机缓存里的词表");
+  if (!ok && !DATA) { $("list").innerHTML = '<div class="empty">词表没加载到<br>连一次网再点「更新」</div>'; }
+  renderMeta();
+  return ok;
+}
+
+function renderMeta() {
+  const m = $("meta");
+  if (!DATA) { m.innerHTML = ""; return; }
+  const n = DATA.count || DATA.words.length;
+  const upd = DATA.updated ? cn(DATA.updated) : "—";
+  const lb = DATA.latest?.date ? "错词批次 " + cn(DATA.latest.date) : "";
+  const set = curKey && SETS[curKey] ? SETS[curKey] : null;
+  let s = `<span>词表 ${n} 词 · 更新 ${upd}</span><span>${lb}</span>`;
+  if (set) {
+    const on = document.querySelectorAll(".r.on").length;
+    s += `<span>本组 ${set.words.length} 词 · 已点开 ${on}</span>`;
+  }
+  m.innerHTML = s;
+}
+
+/* ---------- 抽词算法 ---------- */
+function cmpFreq(a, b) { // 考频降序，待补(-1)最后，同分按词名
+  const fa = a.f < 0 ? -1 : a.f, fb = b.f < 0 ? -1 : b.f;
+  if (fa !== fb) return fb - fa;
+  return a.w < b.w ? -1 : a.w > b.w ? 1 : 0;
+}
+function cmpCnt(a, b) {
+  if (a.c !== b.c) return b.c - a.c;
+  return a.w < b.w ? -1 : a.w > b.w ? 1 : 0;
+}
+
+function buildPick(target, seedStr, dateStr) {
+  const byW = new Map(); DATA.words.forEach(w => byW.set(w.w, w));
+  const used = new Set(), out = [];
+  const push = w => { if (out.length >= target || used.has(w.w)) return false; used.add(w.w); out.push(w.w); return true; };
+  const rnd = lcg(hash(seedStr));
+  const take = (list, n, start) => { let a = 0; const L = list.length; if (!L) return 0;
+    for (let i = 0; i < L && a < n && out.length < target; i++) { if (push(list[(start + i) % L])) a++; } return a; };
+
+  // A 今日（最近一批）错词，考频降序全量
+  const A = (DATA.latest?.words || []).map(w => byW.get(w)).filter(Boolean).sort(cmpFreq);
+  A.forEach(push);
+
+  // B S 档全量，错次降序
+  if (out.length < target) DATA.words.filter(w => w.c >= 5).sort(cmpCnt).forEach(push);
+
+  // C 高频核心 8 个（考频≥20，轮转）
+  if (out.length < target) {
+    const C = DATA.words.filter(w => w.f >= 20).sort(cmpFreq);
+    take(C, 8, Math.floor(rnd() * C.length));
+  }
+  // D 形近连坐 ~10 个（先今日错词所在族，再其它族）
+  if (out.length < target) {
+    const prio = [...new Set(A.map(w => w.fam).filter(Boolean))];
+    const all = [...new Set(DATA.words.filter(w => w.fam).map(w => w.fam))].sort();
+    const order = prio.concat(all.filter(f => prio.indexOf(f) < 0));
+    const famMap = new Map();
+    DATA.words.forEach(w => { if (!w.fam) return; if (!famMap.has(w.fam)) famMap.set(w.fam, []); famMap.get(w.fam).push(w); });
+    let got = 0;
+    for (const f of order) {
+      if (got >= 10 || out.length >= target) break;
+      const mem = (famMap.get(f) || []).slice().sort(cmpCnt);
+      if (!mem.length) continue;
+      const start = Math.floor(rnd() * mem.length);
+      let add = 0;
+      for (let i = 0; i < mem.length && add < 2; i++) { if (push(mem[(start + i) % mem.length])) { add++; got++; } }
+    }
+  }
+  // E 黑洞补漏 6 个（错≥3 且考频≤2）
+  if (out.length < target) {
+    const E = DATA.words.filter(w => w.c >= 3 && w.f >= 0 && w.f <= 2).sort(cmpCnt);
+    take(E, 6, Math.floor(rnd() * E.length));
+  }
+  // F 到期回访 5 个（D-1 / D-3 抽过且错≥3）
+  if (out.length < target) {
+    const d1 = dayShift(dateStr, -1), d3 = dayShift(dateStr, -3);
+    const seen = new Set();
+    Object.values(SETS).forEach(s => { if (s.date === d1 || s.date === d3) s.words.forEach(w => seen.add(w)); });
+    const R = [...seen].map(w => byW.get(w)).filter(w => w && w.c >= 3).sort(cmpCnt);
+    take(R, 5, Math.floor(rnd() * Math.max(1, R.length)));
+  }
+  // G 补位：B 档按考频补足
+  if (out.length < target) {
+    const rest = DATA.words.filter(w => w.c <= 2).sort(cmpFreq);
+    take(rest, target - out.length, Math.floor(rnd() * Math.max(1, rest.length)));
+  }
+  return out;
+}
+
+function draw() {
+  if (!DATA) { toast("词表还没加载"); return; }
+  const target = +$("tgt").value;
+  const day = todayStr();
+  const seq = store.get(K_SEQ, {});
+  const n = (seq[day] || 0) + 1;
+  const prev = Object.keys(SETS).filter(k => k.indexOf(day + "|") === 0).length;
+  const nn = Math.max(n, prev + 1);
+  const key = day + "|" + nn;
+  const words = buildPick(target, key + "#" + target, day);
+  SETS[key] = { date: day, n: nn, target, words, ts: Date.now() };
+  seq[day] = nn; store.set(K_SEQ, seq); store.set(K_SETS, SETS);
+  curKey = key;
+  fillSel();
+  render();
+  toast("抽出 " + words.length + " 词 · " + cn(day) + " 第" + nn + "次");
+}
+
+/* ---------- 渲染 ---------- */
+function render() {
+  const box = $("list");
+  const set = curKey && SETS[curKey];
+  if (!set) { box.innerHTML = '<div class="empty">选个日期，或者点「抽词」<br>抽出来的词会自动存在手机上</div>'; renderMeta(); return; }
+  const byW = new Map(); (DATA?.words || []).forEach(w => byW.set(w.w, w));
+  const html = set.words.map(w => {
+    const o = byW.get(w);
+    const mean = o ? ((o.p || "") + (o.d || "")) : "（词表里没有这个词）";
+    return '<div class="r" data-w="' + w + '"><div class="w">' + w + '</div><div class="m">' + mean + '</div></div>';
+  }).join("");
+  box.innerHTML = html || '<div class="empty">这组是空的</div>';
+  box.querySelectorAll(".r").forEach(el => {
+    el.addEventListener("click", () => { el.classList.toggle("on"); renderMeta(); });
+  });
+  window.scrollTo({ top: 0 });
+  renderMeta();
+}
+
+function fillSel() {
+  const sel = $("sel"), keep = curKey;
+  const keys = Object.keys(SETS).sort((a, b) => {
+    const A = SETS[a], B = SETS[b];
+    if (A.date !== B.date) return A.date < B.date ? 1 : -1;
+    return B.n - A.n;
+  });
+  if (!keys.length) { sel.innerHTML = '<option value="">（还没抽过）</option>'; curKey = null; return; }
+  sel.innerHTML = keys.map(k => {
+    const s = SETS[k];
+    return '<option value="' + k + '">' + cn(s.date) + ' 第' + s.n + '次 · ' + s.words.length + '词</option>';
+  }).join("");
+  if (keep && SETS[keep]) sel.value = keep; else curKey = sel.value = keys[0];
+}
+
+/* ---------- 导出/备份 ---------- */
+function download(name, text, type) {
+  const b = new Blob([text], { type: type || "text/plain;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(b); a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+function setToText(s) {
+  const byW = new Map(); (DATA?.words || []).forEach(w => byW.set(w.w, w));
+  return s.words.map(w => { const o = byW.get(w); return w + "\t" + (o ? (o.p || "") + (o.d || "") : ""); }).join("\n");
+}
+function curSet() { return curKey && SETS[curKey] ? SETS[curKey] : null; }
+
+/* ---------- 事件 ---------- */
+$("btnDraw").addEventListener("click", draw);
+$("sel").addEventListener("change", e => { curKey = e.target.value; render(); });
+$("btnAll").addEventListener("click", () => {
+  const rows = document.querySelectorAll(".r");
+  const allOn = rows.length && document.querySelectorAll(".r.on").length === rows.length;
+  rows.forEach(r => r.classList.toggle("on", !allOn));
+  renderMeta();
+  toast(allOn ? "已全部遮住" : "已全部显示");
+});
+$("btnFsPlus").addEventListener("click", () => { PREFS.fs = Math.min(46, PREFS.fs + 2); applyPrefs(); store.set(K_PREFS, PREFS); });
+$("btnFsMinus").addEventListener("click", () => { PREFS.fs = Math.max(16, PREFS.fs - 2); applyPrefs(); store.set(K_PREFS, PREFS); });
+$("btnTheme").addEventListener("click", () => { PREFS.theme = PREFS.theme === "dark" ? "light" : "dark"; applyPrefs(); store.set(K_PREFS, PREFS); });
+$("btnUpd").addEventListener("click", async () => { toast("更新中…"); const ok = await loadData(true); if (ok) toast("词表已更新 · " + cn(DATA.updated)); });
+$("btnMore").addEventListener("click", () => {
+  const s = curSet();
+  const size = (JSON.stringify(SETS).length / 1024).toFixed(1);
+  $("info").innerHTML =
+    "词表 " + (DATA ? DATA.words.length : 0) + " 词，更新于 " + (DATA && DATA.updated ? cn(DATA.updated) : "—") + "<br>" +
+    "已存 " + Object.keys(SETS).length + " 组抽词（" + size + " KB）<br>" +
+    "当前：" + (s ? cn(s.date) + " 第" + s.n + "次 · " + s.words.length + "词 · 目标" + s.target : "无") + "<br>" +
+    "<br>备份会把所有抽过的组一起导出成 json；换手机时用「恢复」导入。";
+  $("dlg").showModal();
+});
+$("btnClose").addEventListener("click", () => $("dlg").close());
+$("btnExportCur").addEventListener("click", () => {
+  const s = curSet(); if (!s) { toast("没有可导出的组"); return; }
+  download(cn(s.date) + "抽词-第" + s.n + "次.txt", setToText(s));
+  toast("已导出本组");
+});
+$("btnExportAll").addEventListener("click", () => {
+  const keys = Object.keys(SETS).sort(); if (!keys.length) { toast("还没抽过词"); return; }
+  download("抽词全部-" + todayStr() + ".txt", keys.map(k => {
+    const s = SETS[k]; return "=== " + cn(s.date) + " 第" + s.n + "次（" + s.words.length + "词） ===\n" + setToText(s);
+  }).join("\n\n"));
+  toast("已导出全部");
+});
+$("btnBackup").addEventListener("click", () => {
+  download("抽词备份-" + todayStr() + ".json", JSON.stringify({ v: 1, ts: Date.now(), prefs: PREFS, sets: SETS }, null, 1), "application/json");
+  toast("已备份");
+});
+$("btnRestore").addEventListener("click", () => $("fileIn").click());
+$("fileIn").addEventListener("change", e => {
+  const f = e.target.files[0]; if (!f) return;
+  const rd = new FileReader();
+  rd.onload = () => {
+    try {
+      const o = JSON.parse(rd.result);
+      if (!o.sets) throw new Error("不是备份文件");
+      let n = 0;
+      Object.keys(o.sets).forEach(k => { if (!SETS[k]) { SETS[k] = o.sets[k]; n++; } });
+      store.set(K_SETS, SETS);
+      if (o.prefs) { PREFS = Object.assign(PREFS, o.prefs); applyPrefs(); store.set(K_PREFS, PREFS); }
+      fillSel(); render(); toast("恢复 " + n + " 组");
+    } catch (err) { toast("恢复失败：" + err.message); }
+    e.target.value = "";
+  };
+  rd.readAsText(f);
+});
+$("btnClear").addEventListener("click", () => {
+  if (!confirm("清空手机上所有抽词记录？词表缓存会保留。")) return;
+  SETS = {}; store.set(K_SETS, {}); store.del(K_SEQ); curKey = null; fillSel(); render(); toast("已清空");
+});
+
+/* ---------- 启动 ---------- */
+function applyPrefs() {
+  document.documentElement.style.setProperty("--fs", PREFS.fs);
+  document.documentElement.setAttribute("data-theme", PREFS.theme || "light");
+}
+(async function init() {
+  applyPrefs();
+  fillSel();
+  render();
+  await loadData(false);
+  fillSel();
+  render();
+})();
+</script>
+</body>
+</html>
