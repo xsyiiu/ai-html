@@ -64,6 +64,7 @@ dialog::backdrop{background:#0007}
     <button id="btnAll" title="全部显示/隐藏">全显</button>
     <button id="btnUpd" title="重新拉取词表">更新</button>
     <button id="btnTheme" title="深浅色">◐</button>
+    <button id="btnRule" title="本次抽词规则">规则</button>
     <button id="btnMore" title="备份/导出">⋯</button>
   </div>
   <div id="meta"></div>
@@ -86,6 +87,15 @@ dialog::backdrop{background:#0007}
     <div class="note" id="info"></div>
     <div class="row" style="margin-top:14px">
       <button id="btnClose" style="flex:1">关闭</button>
+    </div>
+  </div>
+</dialog>
+<dialog id="dlgRule">
+  <div class="pad">
+    <h3>本次抽词规则</h3>
+    <div class="note" id="ruleBody"></div>
+    <div class="row" style="margin-top:14px">
+      <button id="btnRuleClose" style="flex:1">关闭</button>
     </div>
   </div>
 </dialog>
@@ -169,72 +179,69 @@ function cmpCnt(a, b) {
 
 function buildPick(target, seedStr, dateStr, drawnToday) {
   const byW = new Map(); DATA.words.forEach(w => byW.set(w.w, w));
-  const used = new Set(), out = [];
+  const used = new Set(), out = [], tags = {};
   const drawn = new Set(drawnToday || []);
   let skip = true;
-  const push = w => {
+  const push = (w, tag) => {
     if (out.length >= target || used.has(w.w)) return false;
-    if (skip && drawn.has(w.w)) return false;   // 当天已经抽过的不重复出
-    used.add(w.w); out.push(w.w); return true;
+    if (skip && drawn.has(w.w)) return false;
+    used.add(w.w); out.push(w.w); tags[w.w] = tag; return true;
   };
   const rnd = lcg(hash(seedStr));
-  const take = (list, n, start) => { let a = 0; const L = list.length; if (!L) return 0;
-    for (let i = 0; i < L && a < n && out.length < target; i++) { if (push(list[(start + i) % L])) a++; } return a; };
+  const take = (list, n, start, tag) => { let a = 0; const L = list.length; if (!L) return 0;
+    for (let i = 0; i < L && a < n && out.length < target; i++) { if (push(list[(start + i) % L], tag)) a++; } return a; };
 
   const pass1 = () => {
-
-  // A 今日（最近一批）错词，考频降序全量
-  const A = ((DATA.latest && DATA.latest.words) || []).map(w => byW.get(w)).filter(Boolean).sort(cmpFreq);
-  A.forEach(push);
-
-  // B S 档全量，错次降序
-  if (out.length < target) DATA.words.filter(w => w.c >= 5).sort(cmpCnt).forEach(push);
-
-  // C 高频核心 8 个（考频≥20，轮转）
-  if (out.length < target) {
-    const C = DATA.words.filter(w => w.f >= 20).sort(cmpFreq);
-    take(C, 8, Math.floor(rnd() * C.length));
-  }
-  // D 形近连坐 ~10 个（先今日错词所在族，再其它族）
-  if (out.length < target) {
-    const prio = [...new Set(A.map(w => w.fam).filter(Boolean))];
-    const all = [...new Set(DATA.words.filter(w => w.fam).map(w => w.fam))].sort();
-    const order = prio.concat(all.filter(f => prio.indexOf(f) < 0));
-    const famMap = new Map();
-    DATA.words.forEach(w => { if (!w.fam) return; if (!famMap.has(w.fam)) famMap.set(w.fam, []); famMap.get(w.fam).push(w); });
-    let got = 0;
-    for (const f of order) {
-      if (got >= 10 || out.length >= target) break;
-      const mem = (famMap.get(f) || []).slice().sort(cmpCnt);
-      if (!mem.length) continue;
-      const start = Math.floor(rnd() * mem.length);
-      let add = 0;
-      for (let i = 0; i < mem.length && add < 2; i++) { if (push(mem[(start + i) % mem.length])) { add++; got++; } }
+    // A 今日（最近一批）错词，考频降序全量
+    const A = ((DATA.latest && DATA.latest.words) || []).map(w => byW.get(w)).filter(Boolean).sort(cmpFreq);
+    A.forEach(w => push(w, "今"));
+    // B S 档全量，错次降序
+    if (out.length < target) DATA.words.filter(w => w.c >= 5).sort(cmpCnt).forEach(w => push(w, "S档"));
+    // C 高频核心 8 个（考频≥20，轮转起点）
+    if (out.length < target) {
+      const C = DATA.words.filter(w => w.f >= 20).sort(cmpFreq);
+      take(C, 8, Math.floor(rnd() * C.length), "高频");
     }
-  }
-  // E 黑洞补漏 6 个（错≥3 且考频≤2）
-  if (out.length < target) {
-    const E = DATA.words.filter(w => w.c >= 3 && w.f >= 0 && w.f <= 2).sort(cmpCnt);
-    take(E, 6, Math.floor(rnd() * E.length));
-  }
-  // F 到期回访 5 个（D-1 / D-3 抽过且错≥3）
-  if (out.length < target) {
-    const d1 = dayShift(dateStr, -1), d3 = dayShift(dateStr, -3);
-    const seen = new Set();
-    Object.values(SETS).forEach(s => { if (s.date === d1 || s.date === d3) s.words.forEach(w => seen.add(w)); });
-    const R = [...seen].map(w => byW.get(w)).filter(w => w && w.c >= 3).sort(cmpCnt);
-    take(R, 5, Math.floor(rnd() * Math.max(1, R.length)));
-  }
-  // G 补位：B 档按考频补足
-  if (out.length < target) {
-    const rest = DATA.words.filter(w => w.c <= 2).sort(cmpFreq);
-    take(rest, target - out.length, Math.floor(rnd() * Math.max(1, rest.length)));
-  }
+    // D 形近连坐 ~10 个（今日错词所在族优先）
+    if (out.length < target) {
+      const prio = [...new Set(A.map(w => w.fam).filter(Boolean))];
+      const all = [...new Set(DATA.words.filter(w => w.fam).map(w => w.fam))].sort();
+      const order = prio.concat(all.filter(f => prio.indexOf(f) < 0));
+      const famMap = new Map();
+      DATA.words.forEach(w => { if (!w.fam) return; if (!famMap.has(w.fam)) famMap.set(w.fam, []); famMap.get(w.fam).push(w); });
+      let got = 0;
+      for (const f of order) {
+        if (got >= 10 || out.length >= target) break;
+        const mem = (famMap.get(f) || []).slice().sort(cmpCnt);
+        if (!mem.length) continue;
+        const start = Math.floor(rnd() * mem.length);
+        let add = 0;
+        for (let i = 0; i < mem.length && add < 2; i++) { if (push(mem[(start + i) % mem.length], "形近")) { add++; got++; } }
+      }
+    }
+    // E 黑洞补漏 6 个（错≥3 且考频≤2）
+    if (out.length < target) {
+      const E = DATA.words.filter(w => w.c >= 3 && w.f >= 0 && w.f <= 2).sort(cmpCnt);
+      take(E, 6, Math.floor(rnd() * E.length), "黑洞");
+    }
+    // F 到期回访 5 个（D-1 / D-3 抽过且错≥3）
+    if (out.length < target) {
+      const d1 = dayShift(dateStr, -1), d3 = dayShift(dateStr, -3);
+      const seen = new Set();
+      Object.values(SETS).forEach(s => { if (s.date === d1 || s.date === d3) s.words.forEach(w => seen.add(w)); });
+      const R = [...seen].map(w => byW.get(w)).filter(w => w && w.c >= 3).sort(cmpCnt);
+      take(R, 5, Math.floor(rnd() * Math.max(1, R.length)), "回访");
+    }
+    // G 补位：B 档按考频补足
+    if (out.length < target) {
+      const rest = DATA.words.filter(w => w.c <= 2).sort(cmpFreq);
+      take(rest, target - out.length, Math.floor(rnd() * Math.max(1, rest.length)), "补位");
+    }
   };
 
   pass1();
-  if (out.length < target) { skip = false; pass1(); }  // 词不够了才允许重复出
-  return out;
+  if (out.length < target) { skip = false; pass1(); }
+  return { words: out, tags };
 }
 
 function draw() {
@@ -248,13 +255,13 @@ function draw() {
   const key = day + "|" + nn;
   const drawnToday = [];
   Object.values(SETS).forEach(s => { if (s.date === day) s.words.forEach(w => drawnToday.push(w)); });
-  const words = buildPick(target, key + "#" + target, day, drawnToday);
-  SETS[key] = { date: day, n: nn, target, words, ts: Date.now() };
+  const res = buildPick(target, key + "#" + target, day, drawnToday);
+  SETS[key] = { date: day, n: nn, target, words: res.words, tags: res.tags, ts: Date.now() };
   seq[day] = nn; store.set(K_SEQ, seq); store.set(K_SETS, SETS);
   curKey = key;
   fillSel();
   render();
-  toast("抽出 " + words.length + " 词 · " + cn(day) + " 第" + nn + "次");
+  toast("抽出 " + res.words.length + " 词 · " + cn(day) + " 第" + nn + "次");
 }
 
 /* ---------- 渲染 ---------- */
@@ -318,6 +325,34 @@ $("btnFsPlus").addEventListener("click", () => { PREFS.fs = Math.min(46, PREFS.f
 $("btnFsMinus").addEventListener("click", () => { PREFS.fs = Math.max(16, PREFS.fs - 2); applyPrefs(); store.set(K_PREFS, PREFS); });
 $("btnTheme").addEventListener("click", () => { PREFS.theme = PREFS.theme === "dark" ? "light" : "dark"; applyPrefs(); store.set(K_PREFS, PREFS); });
 $("btnUpd").addEventListener("click", async () => { toast("更新中…"); const ok = await loadData(true); if (ok) toast("词表已更新 · " + cn(DATA.updated)); });
+$("btnRule").addEventListener("click", () => {
+  const s = curSet();
+  if (!s) { toast("先抽一次词"); return; }
+  const order = ["今", "S档", "高频", "形近", "黑洞", "回访", "补位"];
+  const name = { "今": "今日错词（全量，考频降序）", "S档": "S 档（错≥5，全量）", "高频": "高频核心（考频≥20，轮转 8 个）",
+                 "形近": "形近连坐（今日错词所在族优先，约 10 个）", "黑洞": "黑洞补漏（错≥3 且考频≤2，6 个）",
+                 "回访": "到期回访（前 1 天 / 前 3 天抽过且错≥3，5 个）", "补位": "补位（B 档按考频补足）" };
+  const cnt = {};
+  (s.words || []).forEach(w => { const t = (s.tags || {})[w] || "—"; cnt[t] = (cnt[t] || 0) + 1; });
+  let lines = order.filter(t => cnt[t]).map(t => "· " + name[t] + "　<b>" + cnt[t] + "</b> 词").join("<br>");
+  if (cnt["—"]) lines += "<br>· 其余　<b>" + cnt["—"] + "</b> 词";
+  $("ruleBody").innerHTML =
+    "日期 " + cn(s.date) + "　第 " + s.n + " 次　目标 " + s.target + " 词　实抽 <b>" + s.words.length + "</b> 词<br><br>" +
+    "<b>本次构成</b><br>" + lines + "<br><br>" +
+    "<b>怎么定的</b><br>" + [
+      "1. 今日错词：最近一次入账的那批错词全部进来，按考研考频从高到低排。",
+      "2. S 档：错≥5 的词每次都过一遍，按错次从高到低。",
+      "3. 高频核心：考频≥20 的词单独一个圈，按日期挪起点，每次 8 个。",
+      "4. 形近连坐：先抽今日错词所在词族里的其他成员，同族最多 2 个，凑不够再从别的族补，上限 10 个。",
+      "5. 黑洞补漏：错≥3 但考频≤2 的词，按错次从高到低，取 6 个。",
+      "6. 到期回访：翻前 1 天、前 3 天抽过的词，错≥3 的再抽 5 个（隔天、隔三天各看一眼）。",
+      "7. 补位：以上不够目标数量，就从 B 档按考频补；同一词只出现一次。",
+      "8. 同一天抽第 2、第 3 次时，当天已经抽过的词不会再出，除非剩余词不够。"
+    ].map(x => x).join("<br>") +
+    "<br><br><b>字号</b> " + PREFS.fs + "px　<b>词表</b> " + (DATA ? DATA.words.length + " 词，更新于 " + cn(DATA.updated) : "未加载");
+  $("dlgRule").showModal();
+});
+$("btnRuleClose").addEventListener("click", () => $("dlgRule").close());
 $("btnMore").addEventListener("click", () => {
   const s = curSet();
   const size = (JSON.stringify(SETS).length / 1024).toFixed(1);
