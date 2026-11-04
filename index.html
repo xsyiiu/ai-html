@@ -29,13 +29,15 @@ button:active{background:var(--line)}
 #meta{font-size:12px;color:var(--dim);margin-top:6px;display:flex;gap:10px;flex-wrap:wrap}
 main{padding-bottom:60px}
 .r{display:flex;align-items:flex-start;padding:11px 12px 11px 14px;border-bottom:1px solid var(--line);cursor:pointer}
-.w{flex:0 0 auto;width:42%;font-size:calc(var(--fs)*1px);font-weight:650;letter-spacing:.2px;word-break:break-word}
+.w{flex:0 0 auto;width:39%;font-size:calc(var(--fs)*1px);font-weight:650;letter-spacing:.2px;word-break:break-word}
 .m{flex:1;min-width:0;font-size:calc(var(--fs)*0.6px);line-height:1.45;color:var(--dim);
   padding-left:6vw;opacity:0;transition:opacity .12s ease;pointer-events:none}
 .r.on .m{opacity:1}
 .r.on .w{color:var(--acc)}
-.mk{flex:0 0 auto;display:flex;flex-direction:column;gap:4px;margin-left:6px}
-.mk button{width:30px;height:24px;padding:0;font-size:13px;line-height:1;color:var(--dim);border-radius:7px}
+.mk{flex:0 0 auto;display:flex;flex-direction:row;gap:8px;margin-left:8px;align-items:center;align-self:center}
+.mk button{width:46px;height:36px;padding:0;font-size:19px;line-height:1;border-radius:10px;border:1.5px solid transparent;font-weight:600}
+.mk button.no{color:#d14343;border-color:rgba(209,67,67,.55);background:rgba(209,67,67,.09)}
+.mk button.yes{color:#2f8f5b;border-color:rgba(47,143,91,.55);background:rgba(47,143,91,.09)}
 .mk button.on{color:#fff;border-color:transparent}
 .mk button.no.on{background:#d14343}
 .mk button.yes.on{background:#2f8f5b}
@@ -139,7 +141,7 @@ dialog::backdrop{background:#0007}
 
 <script>
 "use strict";
-const APP_VER = "1.4";
+const APP_VER = "1.5";
 const APP_BUILT = "2026-11-04";
 const DATA_URL = "words.json";
 const K_DATA = "ci.data", K_SETS = "ci.sets", K_PREFS = "ci.prefs", K_SEQ = "ci.seq";
