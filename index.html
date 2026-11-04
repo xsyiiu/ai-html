@@ -152,10 +152,10 @@ dialog::backdrop{background:#0007}
 
 <script>
 "use strict";
-const APP_VER = "1.8";
+const APP_VER = "1.9";
 const APP_BUILT = "2026-11-04";
 const DATA_URL = "words.json";
-const K_DATA = "ci.data", K_SETS = "ci.sets", K_PREFS = "ci.prefs", K_SEQ = "ci.seq";
+const K_DATA = "ci.data", K_SETS = "ci.sets", K_PREFS = "ci.prefs", K_SEQ = "ci.seq", K_REV = "ci.rev";
 const $ = id => document.getElementById(id);
 
 /* ---------- 存储 ---------- */
@@ -169,6 +169,7 @@ let DATA = (store.get(K_DATA, null) || {}).payload || null;
 let SETS = store.get(K_SETS, {});      // "2026-11-04|1" -> {date,n,target,words:[...]}
 let PREFS = store.get(K_PREFS, { fs: 26, theme: "light" });
 let curKey = null;                      // 当前查看的组
+let REV = store.get(K_REV, {});          // 每个词的复习状态 {g:间隔天数, d:下次到期, s:连对, l:记错, n:复习次数}
 
 /* ---------- 小工具 ---------- */
 let toastTimer = null;
@@ -209,7 +210,7 @@ function renderMeta() {
   const upd = DATA.updated ? cn(DATA.updated) : "—";
   const lb = (DATA.latest && DATA.latest.date) ? "错词批次 " + cn(DATA.latest.date) : "";
   const set = curKey && SETS[curKey] ? SETS[curKey] : null;
-  let s = `<span>v${APP_VER}</span><span>词表 ${n} 词 · 更新 ${upd}</span><span>${lb}</span>`;
+  let s = `<span>v${APP_VER}</span><span>词表 ${n} 词</span><span>到期 ${dueCount(todayStr())}</span><span>${lb}</span>`;
   if (set) {
     const on = document.querySelectorAll(".r.on").length;
     const bad = document.querySelectorAll(".r.bad").length;
@@ -230,6 +231,45 @@ function cmpCnt(a, b) {
   return a.w < b.w ? -1 : a.w > b.w ? 1 : 0;
 }
 
+/* 间隔复习：REV[词] = {g 间隔天数, d 下次到期日期, s 连续记对次数, l 记错次数, n 复习次数} */
+function addD(day, n) {
+  const a = day.split("-").map(Number);
+  const d = new Date(a[0], a[1] - 1, a[2]);
+  d.setDate(d.getDate() + n);
+  return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate());
+}
+function gap0(c) { return c >= 6 ? 2 : c === 5 ? 3 : c === 4 ? 5 : c === 3 ? 7 : c === 2 ? 10 : 14; }
+function isGrad(w) { const r = REV[w]; return !!r && (r.g || 0) >= 90; }
+function isFuture(w, day) { const r = REV[w]; return !!r && r.d > day; }   // 已排好下次日期，还没到期
+function dueCount(day) { return DATA ? DATA.words.filter(w => REV[w.w] && REV[w.w].d <= day && !isGrad(w.w)).length : 0; }
+function gradCount() { return DATA ? DATA.words.filter(w => isGrad(w.w)).length : 0; }
+
+/* 抽到时：默认按「模糊」处理，间隔不放大 */
+function scheduleAfterDraw(w, day) {
+  const o = DATA.words.find(x => x.w === w); if (!o) return;
+  const r = REV[w] || { g: 0, s: 0, l: 0, n: 0 };
+  if (!r.g) r.g = gap0(o.c);
+  r.d = addD(day, Math.max(2, Math.round(r.g / 2)));
+  r.n = (r.n || 0) + 1;
+  REV[w] = r;
+}
+/* 标记：✓ 间隔放大；✗ 打回 2 天；再点取消 = 回到模糊 */
+function applyMark(w, kind, day) {
+  const o = DATA.words.find(x => x.w === w); if (!o) return;
+  const r = REV[w] || { g: gap0(o.c), s: 0, l: 0, n: 1 };
+  if (kind === 1) {
+    r.s = (r.s || 0) + 1;
+    r.g = Math.min(90, Math.round((r.g || gap0(o.c)) * 1.9));
+    if (r.s >= 3 && o.c >= 5) r.g = 90;          // 错了五六遍还连对三次 → 熟知，90 天后再见
+    r.d = addD(day, r.g);
+  } else if (kind === -1) {
+    r.s = 0; r.l = (r.l || 0) + 1; r.g = 2; r.d = addD(day, 2);
+  } else {
+    r.s = 0; r.g = r.g || gap0(o.c); r.d = addD(day, Math.max(2, Math.round(r.g / 2)));
+  }
+  REV[w] = r;
+}
+
 function buildPick(target, seedStr, dateStr, drawnToday) {
   const byW = new Map(); DATA.words.forEach(w => byW.set(w.w, w));
   const used = new Set(), out = [], tags = {};
@@ -243,20 +283,22 @@ function buildPick(target, seedStr, dateStr, drawnToday) {
   const rnd = lcg(hash(seedStr));
   const take = (list, n, start, tag) => { let a = 0; const L = list.length; if (!L) return 0;
     for (let i = 0; i < L && a < n && out.length < target; i++) { if (push(list[(start + i) % L], tag)) a++; } return a; };
+  const T = target;
 
   const pass1 = () => {
-    // A 今日（最近一批）错词，考频降序全量
+    // A 今日新错词：全量，考频降序
     const A = ((DATA.latest && DATA.latest.words) || []).map(w => byW.get(w)).filter(Boolean).sort(cmpFreq);
     A.forEach(w => push(w, "今"));
-    // B S 档全量，错次降序
-    if (out.length < target) DATA.words.filter(w => w.c >= 5).sort(cmpCnt).forEach(w => push(w, "S档"));
-    // C 高频核心 8 个（考频≥20，轮转起点）
-    if (out.length < target) {
-      const C = DATA.words.filter(w => w.f >= 20).sort(cmpFreq);
-      take(C, 8, Math.floor(rnd() * C.length), "高频");
+
+    // B 到期复习：到期日已到（含逾期），错得越多越靠前
+    if (out.length < T) {
+      const due = DATA.words.filter(w => REV[w.w] && REV[w.w].d <= dateStr && !isGrad(w.w))
+        .sort((a, b) => (b.c - a.c) || cmpFreq(a, b));
+      take(due, Math.round(T * 0.32), 0, "到期");
     }
-    // D 形近连坐 ~10 个（今日错词所在族优先）
-    if (out.length < target) {
+
+    // C 形近连坐：今日错词所在族优先，最多 10 个
+    if (out.length < T) {
       const prio = [...new Set(A.map(w => w.fam).filter(Boolean))];
       const all = [...new Set(DATA.words.filter(w => w.fam).map(w => w.fam))].sort();
       const order = prio.concat(all.filter(f => prio.indexOf(f) < 0));
@@ -264,31 +306,31 @@ function buildPick(target, seedStr, dateStr, drawnToday) {
       DATA.words.forEach(w => { if (!w.fam) return; if (!famMap.has(w.fam)) famMap.set(w.fam, []); famMap.get(w.fam).push(w); });
       let got = 0;
       for (const f of order) {
-        if (got >= 10 || out.length >= target) break;
-        const mem = (famMap.get(f) || []).slice().sort(cmpCnt);
+        if (got >= 10 || out.length >= T) break;
+        const mem = (famMap.get(f) || []).filter(x => !isGrad(x.w) && !isFuture(x.w, dateStr)).slice().sort(cmpCnt);
         if (!mem.length) continue;
-        const start = Math.floor(rnd() * mem.length);
+        const st = Math.floor(rnd() * mem.length);
         let add = 0;
-        for (let i = 0; i < mem.length && add < 2; i++) { if (push(mem[(start + i) % mem.length], "形近")) { add++; got++; } }
+        for (let i = 0; i < mem.length && add < 2; i++) { if (push(mem[(st + i) % mem.length], "形近")) { add++; got++; } }
       }
     }
-    // E 黑洞补漏 6 个（错≥3 且考频≤2）
-    if (out.length < target) {
-      const E = DATA.words.filter(w => w.c >= 3 && w.f >= 0 && w.f <= 2).sort(cmpCnt);
-      take(E, 6, Math.floor(rnd() * E.length), "黑洞");
+
+    // D 黑洞补漏：错≥3 考频≤2，4 个
+    if (out.length < T) {
+      const E = DATA.words.filter(w => w.c >= 3 && w.f >= 0 && w.f <= 2 && !isGrad(w.w) && !isFuture(w.w, dateStr)).sort(cmpCnt);
+      take(E, 4, Math.floor(rnd() * E.length), "黑洞");
     }
-    // F 到期回访 5 个（D-1 / D-3 抽过且错≥3）
-    if (out.length < target) {
-      const d1 = dayShift(dateStr, -1), d3 = dayShift(dateStr, -3);
-      const seen = new Set();
-      Object.values(SETS).forEach(s => { if (s.date === d1 || s.date === d3) s.words.forEach(w => seen.add(w)); });
-      const R = [...seen].map(w => byW.get(w)).filter(w => w && w.c >= 3).sort(cmpCnt);
-      take(R, 5, Math.floor(rnd() * Math.max(1, R.length)), "回访");
+
+    // E 高频核心：考频≥20，8 个
+    if (out.length < T) {
+      const C = DATA.words.filter(w => w.f >= 20 && !isGrad(w.w) && !isFuture(w.w, dateStr)).sort(cmpFreq);
+      take(C, 8, Math.floor(rnd() * C.length), "高频");
     }
-    // G 补位：B 档按考频补足
-    if (out.length < target) {
-      const rest = DATA.words.filter(w => w.c <= 2).sort(cmpFreq);
-      take(rest, target - out.length, Math.floor(rnd() * Math.max(1, rest.length)), "补位");
+
+    // F 补位：按考频补足
+    if (out.length < T) {
+      const rest = DATA.words.filter(w => !isGrad(w.w) && !isFuture(w.w, dateStr)).sort(cmpFreq);
+      take(rest, T - out.length, Math.floor(rnd() * Math.max(1, rest.length)), "补位");
     }
   };
 
@@ -309,6 +351,8 @@ function draw() {
   const drawnToday = [];
   Object.values(SETS).forEach(s => { if (s.date === day) s.words.forEach(w => drawnToday.push(w)); });
   const res = buildPick(target, key + "#" + target, day, drawnToday);
+  res.words.forEach(w => scheduleAfterDraw(w, day));
+  store.set(K_REV, REV);
   SETS[key] = { date: day, n: nn, target, words: res.words, tags: res.tags, ts: Date.now() };
   seq[day] = nn; store.set(K_SEQ, seq); store.set(K_SETS, SETS);
   curKey = key;
@@ -356,6 +400,8 @@ function render() {
         const now = st.marks[w] === k ? 0 : k;
         if (now === 0) delete st.marks[w]; else st.marks[w] = now;
         store.set(K_SETS, SETS);
+        applyMark(w, now, todayStr());
+        store.set(K_REV, REV);
         el.classList.remove("bad", "good");
         el.querySelectorAll(".mk button").forEach(x => x.classList.remove("on"));
         if (now === -1) { el.classList.add("bad"); el.querySelector(".mk .no").classList.add("on"); }
@@ -492,30 +538,44 @@ $("btnBad").addEventListener("click", () => {
 $("btnRule").addEventListener("click", () => {
   const s = curSet();
   if (!s) { toast("先抽一次词"); return; }
-  const order = ["今", "S档", "高频", "形近", "黑洞", "回访", "补位"];
-  const name = { "今": "今日错词（全量，考频降序）", "S档": "S 档（错≥5，全量）", "高频": "高频核心（考频≥20，轮转 8 个）",
-                 "形近": "形近连坐（今日错词所在族优先，约 10 个）", "黑洞": "黑洞补漏（错≥3 且考频≤2，6 个）",
-                 "回访": "到期回访（前 1 天 / 前 3 天抽过且错≥3，5 个）", "补位": "补位（B 档按考频补足）" };
   if (!s.tags) recoverTags(s, curKey);
+  const order = ["今", "到期", "形近", "黑洞", "高频", "补位"];
+  const name = {
+    "今": "今日新错词（全量，考频降序）",
+    "到期": "到期复习（按间隔到期，错多者优先）",
+    "形近": "形近连坐（今日错词所在族优先，约 10 个）",
+    "黑洞": "黑洞补漏（错≥3 且考频≤2，4 个）",
+    "高频": "高频核心（考频≥20，轮转 8 个）",
+    "补位": "补位（按考频补足）"
+  };
   const cnt = {};
   (s.words || []).forEach(w => { const t = (s.tags || {})[w] || "—"; cnt[t] = (cnt[t] || 0) + 1; });
   let lines = order.filter(t => cnt[t]).map(t => "· " + name[t] + "　<b>" + cnt[t] + "</b> 词").join("<br>");
   if (cnt["—"]) lines += (s.tags ? "<br>· 其余　<b>" : "<br>· 这组是旧版本抽的，构成没记下来　<b>") + cnt["—"] + "</b> 词";
+  const d0 = todayStr();
   $("ruleBody").innerHTML =
     "日期 " + cn(s.date) + "　第 " + s.n + " 次　目标 " + s.target + " 词　实抽 <b>" + s.words.length + "</b> 词<br><br>" +
     "<b>本次构成</b><br>" + lines + "<br><br>" +
-    "<b>怎么定的</b><br>" + [
-      "1. 今日错词：最近一次入账的那批错词全部进来，按考研考频从高到低排。",
-      "2. S 档：错≥5 的词每次都过一遍，按错次从高到低。",
-      "3. 高频核心：考频≥20 的词单独一个圈，按日期挪起点，每次 8 个。",
-      "4. 形近连坐：先抽今日错词所在词族里的其他成员，同族最多 2 个，凑不够再从别的族补，上限 10 个。",
-      "5. 黑洞补漏：错≥3 但考频≤2 的词，按错次从高到低，取 6 个。",
-      "6. 到期回访：翻前 1 天、前 3 天抽过的词，错≥3 的再抽 5 个（隔天、隔三天各看一眼）。",
-      "7. 补位：以上不够目标数量，就从 B 档按考频补；同一词只出现一次。",
-      "8. 同一天抽第 2、第 3 次时，当天已经抽过的词不会再出，除非剩余词不够。"
-    ].map(x => x).join("<br>") +
-    "<br><br><b>标记</b> 每行右边 ✗ 记错、✓ 记对，顶部「复制错词」一键复制本组错词<br>" +
-    "<br><b>版本</b> 网站 v" + APP_VER + "（" + cn(APP_BUILT) + "）<br><b>字号</b> " + PREFS.fs + "px　<b>词表</b> " + (DATA ? DATA.words.length + " 词，更新于 " + cn(DATA.updated) : "未加载");
+    "<b>怎么挑的</b><br>" + [
+      "1. 今日新错词：最近一次入账的错词全部进来，按考研考频从高到低——刚错的当天必须过。",
+      "2. 到期复习：每个词都有自己的「下次到期日」，只有到期的才进来；错得多的排前面，最多占本次的三成。",
+      "3. 形近连坐：先抽今日错词所在词族里的其他成员，同族最多 2 个，上限 10 个。",
+      "4. 黑洞补漏：错≥3 但考频≤2 的词，取 4 个。",
+      "5. 高频核心：考频≥20 的词轮转 8 个。",
+      "6. 补位：不够目标数量就按考频补；同一个词只出现一次。",
+      "7. 同一天抽第 2、3 次时，当天已经抽过的词不会再出（词不够才允许重复）。"
+    ].join("<br>") +
+    "<br><br><b>间隔怎么算</b><br>" + [
+      "· 第一次见面：按错误次数定间隔——错≥6 次 → 2 天，错5次 → 3 天，错4次 → 5 天，错3次 → 7 天，错2次 → 10 天，错1次 → 14 天。",
+      "· 点 ✓（记得）：间隔 ×1.9，逐次拉长，最长 90 天。",
+      "· 点 ✗（忘了）：间隔打回 2 天，明天再来。",
+      "· 什么都不点：当「模糊」处理，间隔不放大，过约一半间隔再出现。",
+      "· 错了 5 次以上、连对 3 次的词判为「熟知」，排到 90 天以后，不再天天占量。"
+    ].join("<br>") +
+    "<br><br><b>当前状态</b> 到期 " + dueCount(d0) + " 词 · 熟知 " + gradCount() + " 词 · 已记录复习 " + Object.keys(REV).length + " 词" +
+    "<br><b>标记</b> 每行右边 ✗ 记错、✓ 记对，顶部「复制错词」一键复制本组错词" +
+    "<br><b>版本</b> 网站 v" + APP_VER + "（" + cn(APP_BUILT) + "）<br><b>字号</b> " + PREFS.fs + "px　<b>词表</b> " +
+    (DATA ? DATA.words.length + " 词，更新于 " + cn(DATA.updated) : "未加载");
   $("dlgRule").showModal();
 });
 $("btnRuleClose").addEventListener("click", () => $("dlgRule").close());
@@ -556,7 +616,7 @@ $("btnCopyToday").addEventListener("click", () => {
   copyText(out.join("\n"));
 });
 function doBackup() {
-  download("抽词备份-" + todayStr() + ".json", JSON.stringify({ v: 1, ts: Date.now(), prefs: PREFS, sets: SETS }, null, 1), "application/json");
+  download("抽词备份-" + todayStr() + ".json", JSON.stringify({ v: 2, ts: Date.now(), prefs: PREFS, sets: SETS, rev: REV }, null, 1), "application/json");
   toast("已备份");
 }
 $("btnBackup").addEventListener("click", doBackup);
@@ -573,6 +633,7 @@ $("fileIn").addEventListener("change", e => {
       let n = 0;
       Object.keys(o.sets).forEach(k => { if (!SETS[k]) { SETS[k] = o.sets[k]; n++; } });
       store.set(K_SETS, SETS);
+      if (o.rev) { Object.keys(o.rev).forEach(k => { if (!REV[k]) REV[k] = o.rev[k]; }); store.set(K_REV, REV); }
       if (o.prefs) { PREFS = Object.assign(PREFS, o.prefs); applyPrefs(); store.set(K_PREFS, PREFS); }
       fillSel(); render(); toast("恢复 " + n + " 组");
     } catch (err) { toast("恢复失败：" + err.message); }
@@ -581,8 +642,8 @@ $("fileIn").addEventListener("change", e => {
   rd.readAsText(f);
 });
 function doClear() {
-  if (!confirm("清空手机上所有抽词记录？词表缓存会保留。")) return;
-  SETS = {}; store.set(K_SETS, {}); store.del(K_SEQ); curKey = null; fillSel(); render();
+  if (!confirm("清空手机上所有抽词记录和复习进度？词表缓存会保留。")) return;
+  SETS = {}; REV = {}; store.set(K_SETS, {}); store.set(K_REV, {}); store.del(K_SEQ); curKey = null; fillSel(); render();
   if (!$("manage").hidden) renderManage();
   toast("已清空");
 }
