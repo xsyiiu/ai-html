@@ -104,7 +104,7 @@ const store = {
   del(k) { localStorage.removeItem(k); }
 };
 
-let DATA = store.get(K_DATA, null)?.payload || null;
+let DATA = (store.get(K_DATA, null) || {}).payload || null;
 let SETS = store.get(K_SETS, {});      // "2026-11-04|1" -> {date,n,target,words:[...]}
 let PREFS = store.get(K_PREFS, { fs: 26, theme: "light" });
 let curKey = null;                      // 当前查看的组
@@ -146,7 +146,7 @@ function renderMeta() {
   if (!DATA) { m.innerHTML = ""; return; }
   const n = DATA.count || DATA.words.length;
   const upd = DATA.updated ? cn(DATA.updated) : "—";
-  const lb = DATA.latest?.date ? "错词批次 " + cn(DATA.latest.date) : "";
+  const lb = (DATA.latest && DATA.latest.date) ? "错词批次 " + cn(DATA.latest.date) : "";
   const set = curKey && SETS[curKey] ? SETS[curKey] : null;
   let s = `<span>词表 ${n} 词 · 更新 ${upd}</span><span>${lb}</span>`;
   if (set) {
@@ -167,16 +167,24 @@ function cmpCnt(a, b) {
   return a.w < b.w ? -1 : a.w > b.w ? 1 : 0;
 }
 
-function buildPick(target, seedStr, dateStr) {
+function buildPick(target, seedStr, dateStr, drawnToday) {
   const byW = new Map(); DATA.words.forEach(w => byW.set(w.w, w));
   const used = new Set(), out = [];
-  const push = w => { if (out.length >= target || used.has(w.w)) return false; used.add(w.w); out.push(w.w); return true; };
+  const drawn = new Set(drawnToday || []);
+  let skip = true;
+  const push = w => {
+    if (out.length >= target || used.has(w.w)) return false;
+    if (skip && drawn.has(w.w)) return false;   // 当天已经抽过的不重复出
+    used.add(w.w); out.push(w.w); return true;
+  };
   const rnd = lcg(hash(seedStr));
   const take = (list, n, start) => { let a = 0; const L = list.length; if (!L) return 0;
     for (let i = 0; i < L && a < n && out.length < target; i++) { if (push(list[(start + i) % L])) a++; } return a; };
 
+  const pass1 = () => {
+
   // A 今日（最近一批）错词，考频降序全量
-  const A = (DATA.latest?.words || []).map(w => byW.get(w)).filter(Boolean).sort(cmpFreq);
+  const A = ((DATA.latest && DATA.latest.words) || []).map(w => byW.get(w)).filter(Boolean).sort(cmpFreq);
   A.forEach(push);
 
   // B S 档全量，错次降序
@@ -222,6 +230,10 @@ function buildPick(target, seedStr, dateStr) {
     const rest = DATA.words.filter(w => w.c <= 2).sort(cmpFreq);
     take(rest, target - out.length, Math.floor(rnd() * Math.max(1, rest.length)));
   }
+  };
+
+  pass1();
+  if (out.length < target) { skip = false; pass1(); }  // 词不够了才允许重复出
   return out;
 }
 
@@ -234,7 +246,9 @@ function draw() {
   const prev = Object.keys(SETS).filter(k => k.indexOf(day + "|") === 0).length;
   const nn = Math.max(n, prev + 1);
   const key = day + "|" + nn;
-  const words = buildPick(target, key + "#" + target, day);
+  const drawnToday = [];
+  Object.values(SETS).forEach(s => { if (s.date === day) s.words.forEach(w => drawnToday.push(w)); });
+  const words = buildPick(target, key + "#" + target, day, drawnToday);
   SETS[key] = { date: day, n: nn, target, words, ts: Date.now() };
   seq[day] = nn; store.set(K_SEQ, seq); store.set(K_SETS, SETS);
   curKey = key;
@@ -248,7 +262,7 @@ function render() {
   const box = $("list");
   const set = curKey && SETS[curKey];
   if (!set) { box.innerHTML = '<div class="empty">选个日期，或者点「抽词」<br>抽出来的词会自动存在手机上</div>'; renderMeta(); return; }
-  const byW = new Map(); (DATA?.words || []).forEach(w => byW.set(w.w, w));
+  const byW = new Map(); ((DATA && DATA.words) || []).forEach(w => byW.set(w.w, w));
   const html = set.words.map(w => {
     const o = byW.get(w);
     const mean = o ? ((o.p || "") + (o.d || "")) : "（词表里没有这个词）";
@@ -285,7 +299,7 @@ function download(name, text, type) {
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 }
 function setToText(s) {
-  const byW = new Map(); (DATA?.words || []).forEach(w => byW.set(w.w, w));
+  const byW = new Map(); ((DATA && DATA.words) || []).forEach(w => byW.set(w.w, w));
   return s.words.map(w => { const o = byW.get(w); return w + "\t" + (o ? (o.p || "") + (o.d || "") : ""); }).join("\n");
 }
 function curSet() { return curKey && SETS[curKey] ? SETS[curKey] : null; }
