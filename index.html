@@ -152,7 +152,7 @@ dialog::backdrop{background:#0007}
 
 <script>
 "use strict";
-const APP_VER = "1.9";
+const APP_VER = "2.0";
 const APP_BUILT = "2026-11-04";
 const DATA_URL = "words.json";
 const K_DATA = "ci.data", K_SETS = "ci.sets", K_PREFS = "ci.prefs", K_SEQ = "ci.seq", K_REV = "ci.rev";
@@ -239,6 +239,24 @@ function addD(day, n) {
   return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate());
 }
 function gap0(c) { return c >= 6 ? 2 : c === 5 ? 3 : c === 4 ? 5 : c === 3 ? 7 : c === 2 ? 10 : 14; }
+function dayDiff(a, b) { return Math.round((Date.parse(a + "T00:00:00") - Date.parse(b + "T00:00:00")) / 86400000); }
+let RECENT = new Map();      // 近 30 天该词又被上传／抽到的次数
+function buildRecent(day) {
+  RECENT = new Map();
+  const from = addD(day, -30);
+  const B = (DATA && DATA.batches) || {};
+  Object.keys(B).forEach(d => {
+    if (d >= from && d <= day) (B[d] || []).forEach(w => RECENT.set(w, (RECENT.get(w) || 0) + 1));
+  });
+}
+/* 老账放宽、近期反复错的收紧 */
+function gap0eff(o) {
+  let g = gap0(o.c);
+  const r = RECENT.get(o.w) || 0;
+  if (r === 0) g = Math.min(14, g * 2);      // 近 30 天没再错，当它旧账，先拉开
+  else if (r >= 2) g = Math.max(2, g - 1);   // 近 30 天还在错，收紧
+  return g;
+}
 function isGrad(w) { const r = REV[w]; return !!r && (r.g || 0) >= 90; }
 function isFuture(w, day) { const r = REV[w]; return !!r && r.d > day; }   // 已排好下次日期，还没到期
 function dueCount(day) { return DATA ? DATA.words.filter(w => REV[w.w] && REV[w.w].d <= day && !isGrad(w.w)).length : 0; }
@@ -248,7 +266,7 @@ function gradCount() { return DATA ? DATA.words.filter(w => isGrad(w.w)).length 
 function scheduleAfterDraw(w, day) {
   const o = DATA.words.find(x => x.w === w); if (!o) return;
   const r = REV[w] || { g: 0, s: 0, l: 0, n: 0 };
-  if (!r.g) r.g = gap0(o.c);
+  if (!r.g) r.g = gap0eff(o);
   r.d = addD(day, Math.max(2, Math.round(r.g / 2)));
   r.n = (r.n || 0) + 1;
   REV[w] = r;
@@ -256,16 +274,16 @@ function scheduleAfterDraw(w, day) {
 /* 标记：✓ 间隔放大；✗ 打回 2 天；再点取消 = 回到模糊 */
 function applyMark(w, kind, day) {
   const o = DATA.words.find(x => x.w === w); if (!o) return;
-  const r = REV[w] || { g: gap0(o.c), s: 0, l: 0, n: 1 };
+  const r = REV[w] || { g: gap0eff(o), s: 0, l: 0, n: 1 };
   if (kind === 1) {
     r.s = (r.s || 0) + 1;
-    r.g = Math.min(90, Math.round((r.g || gap0(o.c)) * 1.9));
+    r.g = Math.min(90, Math.round((r.g || gap0eff(o)) * 1.9));
     if (r.s >= 3 && o.c >= 5) r.g = 90;          // 错了五六遍还连对三次 → 熟知，90 天后再见
     r.d = addD(day, r.g);
   } else if (kind === -1) {
     r.s = 0; r.l = (r.l || 0) + 1; r.g = 2; r.d = addD(day, 2);
   } else {
-    r.s = 0; r.g = r.g || gap0(o.c); r.d = addD(day, Math.max(2, Math.round(r.g / 2)));
+    r.s = 0; r.g = r.g || gap0eff(o); r.d = addD(day, Math.max(2, Math.round(r.g / 2)));
   }
   REV[w] = r;
 }
@@ -293,7 +311,7 @@ function buildPick(target, seedStr, dateStr, drawnToday) {
     // B 到期复习：到期日已到（含逾期），错得越多越靠前
     if (out.length < T) {
       const due = DATA.words.filter(w => REV[w.w] && REV[w.w].d <= dateStr && !isGrad(w.w))
-        .sort((a, b) => (b.c - a.c) || cmpFreq(a, b));
+        .sort((a, b) => (dayDiff(dateStr, REV[b.w].d) - dayDiff(dateStr, REV[a.w].d)) || (b.c - a.c) || cmpFreq(a, b));
       take(due, Math.round(T * 0.32), 0, "到期");
     }
 
@@ -350,6 +368,7 @@ function draw() {
   const key = day + "|" + nn;
   const drawnToday = [];
   Object.values(SETS).forEach(s => { if (s.date === day) s.words.forEach(w => drawnToday.push(w)); });
+  buildRecent(day);
   const res = buildPick(target, key + "#" + target, day, drawnToday);
   res.words.forEach(w => scheduleAfterDraw(w, day));
   store.set(K_REV, REV);
@@ -558,7 +577,7 @@ $("btnRule").addEventListener("click", () => {
     "<b>本次构成</b><br>" + lines + "<br><br>" +
     "<b>怎么挑的</b><br>" + [
       "1. 今日新错词：最近一次入账的错词全部进来，按考研考频从高到低——刚错的当天必须过。",
-      "2. 到期复习：每个词都有自己的「下次到期日」，只有到期的才进来；错得多的排前面，最多占本次的三成。",
+      "2. 到期复习：每个词都有自己的「下次到期日」，到期的才进来；按逾期天数排序，拖得最久的先补，最多占本次三成。",
       "3. 形近连坐：先抽今日错词所在词族里的其他成员，同族最多 2 个，上限 10 个。",
       "4. 黑洞补漏：错≥3 但考频≤2 的词，取 4 个。",
       "5. 高频核心：考频≥20 的词轮转 8 个。",
@@ -566,7 +585,8 @@ $("btnRule").addEventListener("click", () => {
       "7. 同一天抽第 2、3 次时，当天已经抽过的词不会再出（词不够才允许重复）。"
     ].join("<br>") +
     "<br><br><b>间隔怎么算</b><br>" + [
-      "· 第一次见面：按错误次数定间隔——错≥6 次 → 2 天，错5次 → 3 天，错4次 → 5 天，错3次 → 7 天，错2次 → 10 天，错1次 → 14 天。",
+      "· 第一次见面：按错误次数定间隔——错≥6 → 2 天，错5 → 3 天，错4 → 5 天，错3 → 7 天，错2 → 10 天，错1 → 14 天。",
+      "· 老账修正：近 30 天没再错的词，首次间隔放大一倍（最多 14 天）；近 30 天还在错的，收紧 1 天。",
       "· 点 ✓（记得）：间隔 ×1.9，逐次拉长，最长 90 天。",
       "· 点 ✗（忘了）：间隔打回 2 天，明天再来。",
       "· 什么都不点：当「模糊」处理，间隔不放大，过约一半间隔再出现。",
