@@ -51,6 +51,17 @@ dialog::backdrop{background:#0007}
 .pad .row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
 .pad button{flex:1;min-width:120px;padding:10px}
 .note{font-size:12px;color:var(--dim);line-height:1.7}
+#manage{position:fixed;inset:0;z-index:40;background:var(--bg);overflow-y:auto;padding-bottom:40px}
+.mbar{display:flex;align-items:center;gap:8px;padding:calc(10px + env(safe-area-inset-top)) 12px 10px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bar)}
+.mbar b{flex:1;font-size:15px}
+.mact{display:flex;gap:6px;padding:10px 12px;flex-wrap:wrap;border-bottom:1px solid var(--line)}
+.mact button{flex:1;min-width:calc(50% - 6px);padding:9px;font-size:13px}
+.mrow{display:flex;align-items:center;gap:8px;padding:11px 12px;border-bottom:1px solid var(--line)}
+.mi{flex:1;min-width:0}
+.mt{font-size:15px;font-weight:600}
+.ms{font-size:12px;color:var(--dim);margin-top:3px}
+.mrow button{padding:7px 12px;font-size:13px}
+.mrow .md{color:#d14343;border-color:#d1434355}
 .toast{position:fixed;left:50%;bottom:74px;transform:translateX(-50%);background:#000c;color:#fff;
   padding:9px 15px;border-radius:20px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:50}
 .toast.on{opacity:1}
@@ -80,6 +91,17 @@ dialog::backdrop{background:#0007}
   <div id="meta"></div>
 </header>
 <main id="list"></main>
+<div id="manage" hidden>
+  <div class="mbar"><b>抽词记录</b><button id="mngClose">关闭</button></div>
+  <div class="mact">
+    <button id="mngExport">导出全部</button>
+    <button id="mngBackup">备份</button>
+    <button id="mngRestore">恢复</button>
+    <button id="mngClear">清空缓存</button>
+  </div>
+  <div id="mngInfo" class="note" style="padding:10px 12px"></div>
+  <div id="mngList"></div>
+</div>
 <div class="toast" id="toast"></div>
 
 <dialog id="dlg">
@@ -117,7 +139,7 @@ dialog::backdrop{background:#0007}
 
 <script>
 "use strict";
-const APP_VER = "1.3";
+const APP_VER = "1.4";
 const APP_BUILT = "2026-11-04";
 const DATA_URL = "words.json";
 const K_DATA = "ci.data", K_SETS = "ci.sets", K_PREFS = "ci.prefs", K_SEQ = "ci.seq";
@@ -282,6 +304,16 @@ function draw() {
   toast("抽出 " + res.words.length + " 词 · " + cn(day) + " 第" + nn + "次");
 }
 
+function recoverTags(s, key) {
+  try {
+    const res = buildPick(s.target, key + "#" + s.target, s.date, []);
+    if (res.words.length === s.words.length && res.words.every((w, i) => w === s.words[i])) {
+      s.tags = res.tags; store.set(K_SETS, SETS); return true;
+    }
+  } catch (e) { }
+  return false;
+}
+
 /* ---------- 渲染 ---------- */
 function render() {
   const box = $("list");
@@ -323,20 +355,61 @@ function render() {
   renderMeta();
 }
 
-function fillSel() {
-  const sel = $("sel"), keep = curKey;
-  const keys = Object.keys(SETS).sort((a, b) => {
+let lastSel = null;
+function sortedKeys() {
+  return Object.keys(SETS).sort((a, b) => {
     const A = SETS[a], B = SETS[b];
     if (A.date !== B.date) return A.date < B.date ? 1 : -1;
     return B.n - A.n;
   });
-  if (!keys.length) { sel.innerHTML = '<option value="">（还没抽过）</option>'; curKey = null; return; }
-  sel.innerHTML = keys.map(k => {
+}
+function fillSel() {
+  const sel = $("sel"), keep = curKey;
+  const keys = sortedKeys();
+  if (!keys.length) { sel.innerHTML = '<option value="">（还没抽过）</option>'; curKey = null; lastSel = null; return; }
+  const top = keys.slice(0, 10);
+  sel.innerHTML = top.map(k => {
     const s = SETS[k];
     return '<option value="' + k + '">' + cn(s.date) + ' 第' + s.n + '次 · ' + s.words.length + '词</option>';
-  }).join("");
+  }).join("") + (keys.length > 10 ? '<option value="__more">查看更多（共' + keys.length + '组）…</option>' : "");
   if (keep && SETS[keep]) sel.value = keep; else curKey = sel.value = keys[0];
+  lastSel = curKey;
 }
+
+/* ---------- 管理页 ---------- */
+function openManage() { $("manage").hidden = false; renderManage(); }
+function closeManage() { $("manage").hidden = true; }
+function renderManage() {
+  const keys = sortedKeys();
+  const size = (JSON.stringify(SETS).length / 1024).toFixed(1);
+  $("mngInfo").innerHTML = "共 " + keys.length + " 组，占 " + size + " KB。<br>点「打开」切到那组，点「删除」删掉那一组。";
+  const box = $("mngList");
+  if (!keys.length) { box.innerHTML = '<div class="empty">还没有抽过的记录</div>'; return; }
+  box.innerHTML = keys.map(k => {
+    const s = SETS[k];
+    const bad = badWords(s).length;
+    const good = s.words.filter(w => (s.marks || {})[w] === 1).length;
+    const cur = k === curKey ? " · 当前" : "";
+    return '<div class="mrow" data-k="' + k + '">' +
+      '<div class="mi"><div class="mt">' + cn(s.date) + " 第" + s.n + "次" + cur + "</div>" +
+      '<div class="ms">' + s.words.length + "词 · 目标" + s.target + " · 错 " + bad + " · 对 " + good + "</div></div>" +
+      '<button class="mo">打开</button><button class="md">删除</button></div>';
+  }).join("");
+  box.querySelectorAll(".mrow").forEach(el => {
+    const k = el.dataset.k;
+    el.querySelector(".mo").addEventListener("click", () => {
+      curKey = lastSel = k; $("sel").value = k; render(); closeManage();
+    });
+    el.querySelector(".md").addEventListener("click", () => {
+      const s = SETS[k];
+      if (!confirm("删除 " + cn(s.date) + " 第" + s.n + "次（" + s.words.length + " 词）？删了就找不回来。")) return;
+      delete SETS[k]; store.set(K_SETS, SETS);
+      if (curKey === k) curKey = null;
+      fillSel(); render(); renderManage(); toast("已删除 1 组");
+    });
+  });
+}
+$("mngClose").addEventListener("click", closeManage);
 
 /* ---------- 导出/备份 ---------- */
 function download(name, text, type) {
@@ -368,7 +441,10 @@ function curSet() { return curKey && SETS[curKey] ? SETS[curKey] : null; }
 
 /* ---------- 事件 ---------- */
 $("btnDraw").addEventListener("click", draw);
-$("sel").addEventListener("change", e => { curKey = e.target.value; render(); });
+$("sel").addEventListener("change", e => {
+  if (e.target.value === "__more") { e.target.value = lastSel || (sortedKeys()[0] || ""); openManage(); return; }
+  curKey = lastSel = e.target.value; render();
+});
 $("btnAll").addEventListener("click", () => {
   const rows = document.querySelectorAll(".r");
   const allOn = rows.length && document.querySelectorAll(".r.on").length === rows.length;
@@ -394,10 +470,11 @@ $("btnRule").addEventListener("click", () => {
   const name = { "今": "今日错词（全量，考频降序）", "S档": "S 档（错≥5，全量）", "高频": "高频核心（考频≥20，轮转 8 个）",
                  "形近": "形近连坐（今日错词所在族优先，约 10 个）", "黑洞": "黑洞补漏（错≥3 且考频≤2，6 个）",
                  "回访": "到期回访（前 1 天 / 前 3 天抽过且错≥3，5 个）", "补位": "补位（B 档按考频补足）" };
+  if (!s.tags) recoverTags(s, curKey);
   const cnt = {};
   (s.words || []).forEach(w => { const t = (s.tags || {})[w] || "—"; cnt[t] = (cnt[t] || 0) + 1; });
   let lines = order.filter(t => cnt[t]).map(t => "· " + name[t] + "　<b>" + cnt[t] + "</b> 词").join("<br>");
-  if (cnt["—"]) lines += "<br>· 其余　<b>" + cnt["—"] + "</b> 词";
+  if (cnt["—"]) lines += (s.tags ? "<br>· 其余　<b>" : "<br>· 这组是旧版本抽的，构成没记下来　<b>") + cnt["—"] + "</b> 词";
   $("ruleBody").innerHTML =
     "日期 " + cn(s.date) + "　第 " + s.n + " 次　目标 " + s.target + " 词　实抽 <b>" + s.words.length + "</b> 词<br><br>" +
     "<b>本次构成</b><br>" + lines + "<br><br>" +
@@ -433,13 +510,15 @@ $("btnExportCur").addEventListener("click", () => {
   download(cn(s.date) + "抽词-第" + s.n + "次.txt", setToText(s));
   toast("已导出本组");
 });
-$("btnExportAll").addEventListener("click", () => {
+function doExportAll() {
   const keys = Object.keys(SETS).sort(); if (!keys.length) { toast("还没抽过词"); return; }
   download("抽词全部-" + todayStr() + ".txt", keys.map(k => {
     const s = SETS[k]; return "=== " + cn(s.date) + " 第" + s.n + "次（" + s.words.length + "词） ===\n" + setToText(s);
   }).join("\n\n"));
   toast("已导出全部");
-});
+}
+$("btnExportAll").addEventListener("click", doExportAll);
+$("mngExport").addEventListener("click", doExportAll);
 $("btnCopyAll").addEventListener("click", () => {
   const s = curSet(); if (!s) { toast("没有可复制的组"); return; }
   copyText(s.words.join("\n"));
@@ -450,11 +529,14 @@ $("btnCopyToday").addEventListener("click", () => {
   if (!out.length) { toast("今天还没有标错的词"); return; }
   copyText(out.join("\n"));
 });
-$("btnBackup").addEventListener("click", () => {
+function doBackup() {
   download("抽词备份-" + todayStr() + ".json", JSON.stringify({ v: 1, ts: Date.now(), prefs: PREFS, sets: SETS }, null, 1), "application/json");
   toast("已备份");
-});
+}
+$("btnBackup").addEventListener("click", doBackup);
+$("mngBackup").addEventListener("click", doBackup);
 $("btnRestore").addEventListener("click", () => $("fileIn").click());
+$("mngRestore").addEventListener("click", () => $("fileIn").click());
 $("fileIn").addEventListener("change", e => {
   const f = e.target.files[0]; if (!f) return;
   const rd = new FileReader();
@@ -472,10 +554,14 @@ $("fileIn").addEventListener("change", e => {
   };
   rd.readAsText(f);
 });
-$("btnClear").addEventListener("click", () => {
+function doClear() {
   if (!confirm("清空手机上所有抽词记录？词表缓存会保留。")) return;
-  SETS = {}; store.set(K_SETS, {}); store.del(K_SEQ); curKey = null; fillSel(); render(); toast("已清空");
-});
+  SETS = {}; store.set(K_SETS, {}); store.del(K_SEQ); curKey = null; fillSel(); render();
+  if (!$("manage").hidden) renderManage();
+  toast("已清空");
+}
+$("btnClear").addEventListener("click", doClear);
+$("mngClear").addEventListener("click", doClear);
 
 /* ---------- 启动 ---------- */
 function applyPrefs() {
