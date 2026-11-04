@@ -1,0 +1,19 @@
+{
+  "name": "抽词复习",
+  "short_name": "抽词",
+  "description": "考研单词抽词复习：点开看意思，标记对错，一键复制错词",
+  "lang": "zh-CN",
+  "start_url": "./",
+  "scope": "./",
+  "id": "/ai-html/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "portrait",
+  "background_color": "#111418",
+  "theme_color": "#111418",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
