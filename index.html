@@ -45,6 +45,10 @@ main{padding-bottom:60px}
 .r.bad .w{color:#d14343}
 .r.good{background:rgba(47,143,91,.06)}
 .r.good .w{color:#2f8f5b}
+body.big .r{flex-wrap:wrap;align-items:flex-start}
+body.big .w{width:calc(100% - 112px);max-width:calc(100% - 112px)}
+body.big .mk{align-self:flex-start;margin-top:2px}
+body.big .m{order:3;flex:0 0 100%;padding-left:0;margin-top:6px;line-height:1.35}
 .empty{padding:40px 20px;text-align:center;color:var(--dim);font-size:14px;line-height:1.9}
 dialog{border:none;border-radius:14px;padding:0;background:var(--bar);color:var(--fg);max-width:92vw;width:420px}
 dialog::backdrop{background:#0007}
@@ -141,7 +145,7 @@ dialog::backdrop{background:#0007}
 
 <script>
 "use strict";
-const APP_VER = "1.5";
+const APP_VER = "1.6";
 const APP_BUILT = "2026-11-04";
 const DATA_URL = "words.json";
 const K_DATA = "ci.data", K_SETS = "ci.sets", K_PREFS = "ci.prefs", K_SEQ = "ci.seq";
@@ -454,8 +458,9 @@ $("btnAll").addEventListener("click", () => {
   renderMeta();
   toast(allOn ? "已全部遮住" : "已全部显示");
 });
-$("btnFsPlus").addEventListener("click", () => { PREFS.fs = Math.min(46, PREFS.fs + 2); applyPrefs(); store.set(K_PREFS, PREFS); });
-$("btnFsMinus").addEventListener("click", () => { PREFS.fs = Math.max(16, PREFS.fs - 2); applyPrefs(); store.set(K_PREFS, PREFS); });
+function fsStep() { return PREFS.fs >= 64 ? 8 : PREFS.fs >= 40 ? 4 : 2; }
+$("btnFsPlus").addEventListener("click", () => { PREFS.fs = Math.min(128, PREFS.fs + fsStep()); applyPrefs(); store.set(K_PREFS, PREFS); });
+$("btnFsMinus").addEventListener("click", () => { PREFS.fs = Math.max(16, PREFS.fs - fsStep()); applyPrefs(); store.set(K_PREFS, PREFS); });
 $("btnTheme").addEventListener("click", () => { PREFS.theme = PREFS.theme === "dark" ? "light" : "dark"; applyPrefs(); store.set(K_PREFS, PREFS); });
 $("btnUpd").addEventListener("click", async () => { toast("更新中…"); const ok = await loadData(true); if (ok) toast("词表已更新 · " + cn(DATA.updated)); });
 $("btnBad").addEventListener("click", () => {
@@ -569,6 +574,7 @@ $("mngClear").addEventListener("click", doClear);
 function applyPrefs() {
   document.documentElement.style.setProperty("--fs", PREFS.fs);
   document.documentElement.setAttribute("data-theme", PREFS.theme || "light");
+  document.body.classList.toggle("big", PREFS.fs >= 60);
 }
 (async function init() {
   applyPrefs();
