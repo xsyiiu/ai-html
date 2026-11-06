@@ -66,6 +66,8 @@ dialog::backdrop{background:#0007}
 .mbar b{flex:1;font-size:15px}
 .mact{display:flex;gap:6px;padding:10px 12px;flex-wrap:wrap;border-bottom:1px solid var(--line)}
 .mact button{flex:1;min-width:calc(50% - 6px);padding:12px;font-size:15px}
+.vrow{display:flex;align-items:center;gap:10px;margin:10px 0 2px;font-size:15px;color:var(--dim)}
+.vrow input{flex:0 0 110px;font-size:22px;font-weight:700;text-align:center;padding:10px 6px;border-radius:11px;border:1px solid var(--line);background:var(--bar);color:var(--fg);font-family:inherit}
 .mrow{display:flex;align-items:center;gap:8px;padding:11px 12px;border-bottom:1px solid var(--line)}
 .mi{flex:1;min-width:0}
 .mt{font-size:15px;font-weight:600}
@@ -132,6 +134,7 @@ dialog::backdrop{background:#0007}
       <button id="btnClear">清空缓存</button>
       <button id="btnVib">振动测试</button>
     </div>
+    <div class="vrow"><span>振动时长</span><input type="number" id="vibMs" min="0" max="200" step="5" inputmode="numeric" value="15"><span>毫秒（0 = 关闭）</span></div>
     <div class="note" id="info"></div>
     <div class="row" style="margin-top:14px">
       <button id="btnClose" style="flex:1">关闭</button>
@@ -151,7 +154,7 @@ dialog::backdrop{background:#0007}
 
 <script>
 "use strict";
-const APP_VER = "2.4";
+const APP_VER = "2.5";
 const APP_BUILT = "2026-11-06";
 const DATA_URL = "words.json";
 const K_DATA = "ci.data", K_SETS = "ci.sets", K_PREFS = "ci.prefs", K_SEQ = "ci.seq", K_REV = "ci.rev";
@@ -166,7 +169,8 @@ const store = {
 
 let DATA = (store.get(K_DATA, null) || {}).payload || null;
 let SETS = store.get(K_SETS, {});      // "2026-11-04|1" -> {date,n,target,words:[...]}
-let PREFS = store.get(K_PREFS, { fs: 26, theme: "light" });
+let PREFS = Object.assign({ vib: 15 }, store.get(K_PREFS, { fs: 26, theme: "light" }));
+function buzz(ms) { try { const v = (ms === undefined ? (+PREFS.vib || 0) : ms); if (v > 0 && navigator.vibrate) navigator.vibrate(v); } catch (e) {} }
 let curKey = null;                      // 当前查看的组
 let REV = store.get(K_REV, {});          // 每个词的复习状态 {g:间隔天数, d:下次到期, s:连对, l:记错, n:复习次数}
 
@@ -412,7 +416,7 @@ function render() {
     el.querySelectorAll(".mk button").forEach(b => {
       b.addEventListener("click", ev => {
         ev.stopPropagation();
-        try { if (navigator.vibrate) navigator.vibrate(20); } catch (e) {}
+        buzz();
         const w = el.dataset.w, k = +b.dataset.k;
         const st = curSet();
         st.marks = st.marks || {};
@@ -602,10 +606,23 @@ $("btnRule").addEventListener("click", () => {
 $("btnRuleClose").addEventListener("click", () => $("dlgRule").close());
 $("btnVib").addEventListener("click", () => {
   const has = ("vibrate" in navigator) && typeof navigator.vibrate === "function";
-  let ok = false;
-  try { ok = has ? navigator.vibrate(40) : false; } catch (e) { ok = false; }
-  toast(has ? ("已请求振动，返回 " + ok + "（false 多半是系统关了触感/静音/勿扰）") : "此浏览器没有振动接口");
+  const ms = +PREFS.vib || 0;
+  if (!has) { toast("此浏览器没有振动接口"); return; }
+  if (ms <= 0) { toast("当前是 0 毫秒，先在上面填个数字再试"); return; }
+  const ok = navigator.vibrate(ms);
+  toast("已请求 " + ms + "ms，返回 " + ok + (ok ? "" : "（被系统拦了）") + "；若手机仍静音，把铃声调到“振动”档再试");
 });
+(() => {
+  const inp = $("vibMs");
+  inp.value = PREFS.vib;
+  inp.addEventListener("change", () => {
+    let v = parseInt(inp.value, 10);
+    if (isNaN(v)) v = 15;
+    v = Math.max(0, Math.min(200, v));
+    PREFS.vib = v; inp.value = v; store.set(K_PREFS, PREFS);
+    buzz(v); toast("振动时长 " + v + "ms" + (v ? "" : "（已关闭）"));
+  });
+})();
 
 $("btnMore").addEventListener("click", () => {
   const s = curSet();
