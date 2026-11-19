@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-<meta name="theme-color" content="#111418">
+<meta name="theme-color" content="#f3f1ec">
 <title>抽词复习</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-192.png">
@@ -15,67 +15,115 @@
 html,body{touch-action:manipulation;-webkit-text-size-adjust:100%}
 :root{
   --fs:26;
-  --bg:#f6f6f4; --fg:#14171a; --dim:#5d6b7a; --line:#e2e2dd; --bar:#fbfbf9; --acc:#2f6f4f;
+  --bg:#f3f1ec; --card:#fffdf9; --fg:#1d2228; --dim:#7a8088; --mean:#3e4852; --line:#e4e0d8; --bar:#f3f1ecf2;
+  --acc:#2c5d8a; --accsoft:rgba(44,93,138,.10);
+  --bad:#c0463c; --badsoft:rgba(192,70,60,.10); --good:#2f7d5a; --goodsoft:rgba(47,125,90,.10);
+  --shadow:0 1px 2px rgba(40,30,10,.05),0 2px 8px rgba(40,30,10,.04);
 }
 html[data-theme="dark"]{
-  --bg:#111418; --fg:#e9edf1; --dim:#8ab4d8; --line:#252a31; --bar:#171b21; --acc:#7fd1a8;
+  --bg:#12161c; --card:#1a1f27; --fg:#ece8e1; --dim:#8a939e; --mean:#bcc7d2; --line:#262c35; --bar:#12161cf2;
+  --acc:#7fb0dc; --accsoft:rgba(127,176,220,.14);
+  --bad:#e57368; --badsoft:rgba(229,115,104,.13); --good:#6cc49a; --goodsoft:rgba(108,196,154,.12);
+  --shadow:none;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;padding:0;background:var(--bg);color:var(--fg);
   font-family:-apple-system,system-ui,"PingFang SC","Noto Sans SC",sans-serif}
-header{position:sticky;top:0;z-index:20;background:var(--bar);border-bottom:1px solid var(--line);
-  padding:8px 10px calc(6px + env(safe-area-inset-top)/3);padding-top:calc(8px + env(safe-area-inset-top))}
+body{min-height:100vh}
+
+/* ---------- 顶栏 ---------- */
+header{position:sticky;top:0;z-index:20;background:var(--bar);
+  -webkit-backdrop-filter:saturate(1.4) blur(10px);backdrop-filter:saturate(1.4) blur(10px);
+  border-bottom:1px solid var(--line);
+  padding:calc(8px + env(safe-area-inset-top)) 10px 8px}
+header>div{max-width:640px;margin-left:auto;margin-right:auto}
 .l1{display:flex;gap:8px;align-items:center}
-.l2{display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap}
-select,button{font:inherit;font-size:16px;font-weight:500;color:var(--fg);background:transparent;border:1px solid var(--line);
-  border-radius:11px;padding:11px 12px;min-height:48px;line-height:1.2}
+.l2{display:flex;gap:6px;align-items:center;margin-top:8px}
+.l2 button{flex:1 1 0;min-width:0;padding:10px 4px;font-size:15px;background:var(--card)}
+select,button{font:inherit;font-size:16px;font-weight:500;color:var(--fg);background:var(--card);border:1px solid var(--line);
+  border-radius:12px;padding:11px 12px;min-height:48px;line-height:1.2}
+select{-webkit-appearance:none;appearance:none;padding-right:26px;
+  background-image:linear-gradient(45deg,transparent 50%,var(--dim) 50%),linear-gradient(135deg,var(--dim) 50%,transparent 50%);
+  background-position:calc(100% - 15px) 50%,calc(100% - 10px) 50%;background-size:5px 5px;background-repeat:no-repeat}
 button:active{background:var(--line)}
-#sel{flex:1 1 auto;min-width:120px}
-#btnDraw{background:var(--acc);color:#fff;border-color:transparent;font-weight:700;padding:11px 20px;font-size:17px}
+#sel{flex:1 1 auto;min-width:0}
+#tgt{flex:0 0 auto;width:74px}
+#btnDraw{flex:0 0 auto;background:var(--acc);color:#fff;border-color:transparent;font-weight:700;padding:11px 22px;font-size:17px;letter-spacing:2px}
+html[data-theme="dark"] #btnDraw{color:#0f1720}
+#btnDraw:active{filter:brightness(.9)}
+#btnInstall{background:var(--acc)!important;color:#fff!important;border-color:transparent!important;font-weight:700}
 .tiny{font-size:13px;color:var(--dim);padding:8px 10px}
-#meta{font-size:12px;color:var(--dim);margin-top:6px;display:flex;gap:10px;flex-wrap:wrap}
-main{padding-bottom:60px}
-.r{display:grid;grid-template-columns:1fr auto;column-gap:10px;align-items:center;padding:10px 12px 10px 14px;border-bottom:1px solid var(--line);cursor:pointer}
-.w{grid-area:1/1;min-width:0;font-size:calc(var(--fs)*1px);font-weight:650;letter-spacing:.2px;word-break:break-word}
-.m{grid-area:2/1/3/3;visibility:hidden;font-size:calc(var(--fs)*0.55px);line-height:1.4;color:var(--dim);min-height:calc(var(--fs)*0.55px*1.4);padding-left:0;margin-top:2px;pointer-events:none}
-.r.on .m{visibility:visible}
+#meta{font-size:12px;color:var(--dim);margin-top:7px;display:flex;gap:4px 0;flex-wrap:wrap;line-height:1.5}
+#meta span+span::before{content:"·";margin:0 7px;opacity:.6}
+#meta:empty{display:none}
+
+/* ---------- 词卡 ---------- */
+main{max-width:640px;margin:0 auto;padding:6px 0 calc(70px + env(safe-area-inset-bottom))}
+.r{display:grid;grid-template-columns:1fr auto;column-gap:10px;align-items:center;
+  margin:7px 8px;padding:10px 10px 10px 14px;background:var(--card);border:1px solid var(--line);
+  border-radius:14px;box-shadow:var(--shadow);cursor:pointer;position:relative;overflow:hidden;
+  transition:background .12s,border-color .12s}
+.r::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:transparent;transition:background .12s}
+.w{grid-area:1/1;min-width:0;font-size:calc(var(--fs)*1px);font-weight:650;letter-spacing:.2px;word-break:break-word;line-height:1.2}
+.m{grid-area:2/1/3/3;visibility:hidden;font-size:calc(var(--fs)*0.55px);line-height:1.45;color:var(--mean);
+  min-height:calc(var(--fs)*0.55px*1.45);margin-top:6px;padding-left:10px;border-left:3px solid transparent;pointer-events:none}
+.r.on .m{visibility:visible;border-left-color:var(--acc)}
 .r.on .w{color:var(--acc)}
-.mk{flex:0 0 auto;display:flex;flex-direction:row;gap:10px;margin-left:10px;align-items:center;align-self:center}
-.mk button{width:calc(var(--fs)*1px);height:calc(var(--fs)*1px);min-width:44px;min-height:44px;padding:0;font-size:calc(var(--fs)*0.5px);line-height:1;border-radius:14px;border:3px solid transparent;font-weight:700;transition:transform .07s ease-out,background .1s,box-shadow .12s;touch-action:manipulation}.mk button:active{transform:scale(.88)}@keyframes pop{0%{transform:scale(1.12)}60%{transform:scale(.95)}100%{transform:scale(1)}}.mk button.hit{animation:pop .18s ease-out}
-.mk button.no{color:#d14343;border-color:rgba(209,67,67,.55);background:rgba(209,67,67,.09)}
-.mk button.yes{color:#2f8f5b;border-color:rgba(47,143,91,.55);background:rgba(47,143,91,.09)}
+.r.on{border-color:var(--accsoft)}
+.mk{grid-area:1/2;justify-self:end;display:flex;flex-direction:row;gap:10px;align-items:center;align-self:center}
+.mk button{width:calc(var(--fs)*1px);height:calc(var(--fs)*1px);min-width:44px;min-height:44px;padding:0;font-size:calc(var(--fs)*0.5px);line-height:1;border-radius:14px;border:3px solid transparent;font-weight:700;transition:transform .07s ease-out,background .1s,box-shadow .12s;touch-action:manipulation}
+.mk button:active{transform:scale(.88)}
+@keyframes pop{0%{transform:scale(1.12)}60%{transform:scale(.95)}100%{transform:scale(1)}}
+.mk button.hit{animation:pop .18s ease-out}
+.mk button.no{color:var(--bad);border-color:var(--badsoft);background:var(--badsoft)}
+.mk button.yes{color:var(--good);border-color:var(--goodsoft);background:var(--goodsoft)}
 .mk button.on{color:#fff;border-color:transparent}
-.mk button.no.on{background:#d14343}
-.mk button.yes.on{background:#2f8f5b}
-.r.bad{background:rgba(209,67,67,.07)}
-.r.bad .w{color:#d14343}
-.r.good{background:rgba(47,143,91,.06)}
-.r.good .w{color:#2f8f5b}
-.mk{grid-area:1/2;justify-self:end;gap:10px;margin-left:0;align-self:center}
-body.big .m{order:3;flex:0 0 100%;padding-left:0;margin-top:6px;line-height:1.35}
-.empty{padding:40px 20px;text-align:center;color:var(--dim);font-size:14px;line-height:1.9}
-dialog{border:none;border-radius:14px;padding:0;background:var(--bar);color:var(--fg);max-width:92vw;width:420px}
-dialog::backdrop{background:#0007}
-.pad{padding:14px 16px}
-.pad h3{margin:2px 0 12px;font-size:15px}
-.pad .row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
-.pad button{flex:1;min-width:120px;padding:12px;font-size:15px}
+.mk button.no.on{background:var(--bad)}
+.mk button.yes.on{background:var(--good)}
+html[data-theme="dark"] .mk button.on{color:#12161c}
+.r.bad::before{background:var(--bad)}
+.r.bad .w{color:var(--bad)}
+.r.good::before{background:var(--good)}
+.r.good .w{color:var(--good)}
+body.big .r{margin:6px 5px;padding:8px 8px 8px 12px}
+body.big .m{margin-top:6px;line-height:1.35}
+.empty{padding:56px 24px;text-align:center;color:var(--dim);font-size:15px;line-height:2}
+
+/* ---------- 弹窗：底部面板 ---------- */
+dialog{border:none;padding:0;background:var(--card);color:var(--fg);
+  width:100%;max-width:640px;margin:auto auto 0;border-radius:20px 20px 0 0;
+  max-height:88vh;overflow-y:auto;box-shadow:0 -6px 30px rgba(0,0,0,.18)}
+dialog[open]{animation:up .2s ease-out}
+@keyframes up{from{transform:translateY(40px);opacity:.4}to{transform:none;opacity:1}}
+dialog::backdrop{background:#0008}
+.pad{padding:10px 16px calc(16px + env(safe-area-inset-bottom))}
+.pad::before{content:"";display:block;width:40px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 12px}
+.pad h3{margin:2px 0 12px;font-size:16px}
+.pad h4{margin:14px 0 8px;font-size:12px;font-weight:600;color:var(--dim);letter-spacing:1px}
+.pad .row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.pad button{flex:1;min-width:120px;padding:12px;font-size:15px;background:var(--bg)}
+.pad button.pri{background:var(--accsoft);color:var(--acc);border-color:transparent;font-weight:600}
 .note{font-size:12px;color:var(--dim);line-height:1.7}
+#ruleBody{font-size:13.5px;color:var(--mean);line-height:1.8}
+#ruleBody b{color:var(--fg)}
+
+/* ---------- 管理页 ---------- */
 #manage{position:fixed;inset:0;z-index:40;background:var(--bg);overflow-y:auto;padding-bottom:40px}
+#manage>*{max-width:640px;margin-left:auto;margin-right:auto}
 .mbar{display:flex;align-items:center;gap:8px;padding:calc(10px + env(safe-area-inset-top)) 12px 10px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bar)}
-.mbar b{flex:1;font-size:15px}
-.mact{display:flex;gap:6px;padding:10px 12px;flex-wrap:wrap;border-bottom:1px solid var(--line)}
+.mbar b{flex:1;font-size:16px}
+.mact{display:flex;gap:6px;padding:10px 12px;flex-wrap:wrap}
 .mact button{flex:1;min-width:calc(50% - 6px);padding:12px;font-size:15px}
 .vrow{display:flex;align-items:center;gap:10px;margin:10px 0 2px;font-size:15px;color:var(--dim)}
-.vrow input{flex:0 0 110px;font-size:22px;font-weight:700;text-align:center;padding:10px 6px;border-radius:11px;border:1px solid var(--line);background:var(--bar);color:var(--fg);font-family:inherit}
-.mrow{display:flex;align-items:center;gap:8px;padding:11px 12px;border-bottom:1px solid var(--line)}
+.vrow input{flex:0 0 110px;font-size:22px;font-weight:700;text-align:center;padding:10px 6px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--fg);font-family:inherit}
+.mrow{display:flex;align-items:center;gap:8px;margin:6px 10px;padding:11px 12px;background:var(--card);border:1px solid var(--line);border-radius:12px}
 .mi{flex:1;min-width:0}
 .mt{font-size:15px;font-weight:600}
 .ms{font-size:12px;color:var(--dim);margin-top:3px}
 .mrow button{padding:10px 14px;font-size:15px}
-.mrow .md{color:#d14343;border-color:#d1434355}
-.toast{position:fixed;left:50%;bottom:74px;transform:translateX(-50%);background:#000c;color:#fff;
-  padding:9px 15px;border-radius:20px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:50}
+.mrow .md{color:var(--bad);border-color:var(--badsoft)}
+.toast{position:fixed;left:50%;bottom:calc(74px + env(safe-area-inset-bottom));transform:translateX(-50%);background:#1d2228e6;color:#fff;
+  padding:10px 16px;border-radius:20px;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:50;max-width:88vw;text-align:center}
 .toast.on{opacity:1}
 </style>
 </head>
@@ -91,15 +139,12 @@ dialog::backdrop{background:#0007}
     <button id="btnDraw">抽词</button>
   </div>
   <div class="l2">
-    <button id="btnInstall" hidden style="background:var(--acc);color:#fff;border-color:transparent;font-weight:700">安装</button>
+    <button id="btnInstall" hidden>安装</button>
     <button id="btnFsMinus" title="字号变小">A−</button>
     <button id="btnFsPlus" title="字号变大">A+</button>
     <button id="btnAll" title="全部显示/隐藏">全显</button>
-    <button id="btnUpd" title="重新拉取词表">更新</button>
     <button id="btnTheme" title="深浅色">◐</button>
-    <button id="btnBad" title="复制本组错词">复制错词</button>
-    <button id="btnRule" title="本次抽词规则">规则</button>
-    <button id="btnMore" title="备份/导出">⋯</button>
+    <button id="btnMore" title="更多">⋯</button>
   </div>
   <div id="meta"></div>
 </header>
@@ -119,7 +164,13 @@ dialog::backdrop{background:#0007}
 
 <dialog id="dlg">
   <div class="pad">
-    <h3>数据</h3>
+    <h3>更多</h3>
+    <div class="row">
+      <button id="btnUpd" class="pri" title="重新拉取词表">更新词表</button>
+      <button id="btnBad" class="pri" title="复制本组错词">复制错词</button>
+      <button id="btnRule" class="pri" title="本次抽词规则">抽词规则</button>
+    </div>
+    <h4>导出与复制</h4>
     <div class="row">
       <button id="btnExportCur">导出本组</button>
       <button id="btnExportAll">导出全部</button>
@@ -128,6 +179,7 @@ dialog::backdrop{background:#0007}
       <button id="btnCopyAll">复制本组全部</button>
       <button id="btnCopyToday">复制今天错词</button>
     </div>
+    <h4>备份与设置</h4>
     <div class="row">
       <button id="btnBackup">备份</button>
       <button id="btnRestore">恢复</button>
@@ -154,8 +206,8 @@ dialog::backdrop{background:#0007}
 
 <script>
 "use strict";
-const APP_VER = "2.5";
-const APP_BUILT = "2026-11-06";
+const APP_VER = "2.6";
+const APP_BUILT = "2026-11-19";
 const DATA_URL = "words.json";
 const K_DATA = "ci.data", K_SETS = "ci.sets", K_PREFS = "ci.prefs", K_SEQ = "ci.seq", K_REV = "ci.rev";
 const $ = id => document.getElementById(id);
@@ -700,7 +752,10 @@ function applyPrefs() {
   document.documentElement.style.setProperty("--fs", PREFS.fs);
   document.documentElement.setAttribute("data-theme", PREFS.theme || "light");
   document.body.classList.toggle("big", PREFS.fs >= 60);
+  const tc = document.querySelector('meta[name="theme-color"]');
+  if (tc) tc.setAttribute("content", PREFS.theme === "dark" ? "#12161c" : "#f3f1ec");
 }
+["btnUpd", "btnBad", "btnRule"].forEach(id => $(id).addEventListener("click", () => { if ($("dlg").open) $("dlg").close(); }, true));
 (async function init() {
   applyPrefs();
   if ("serviceWorker" in navigator) {
