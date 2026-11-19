@@ -55,6 +55,12 @@ html[data-theme="dark"] #btnDraw{color:#0f1720}
 #meta{font-size:12px;color:var(--dim);margin-top:7px;display:flex;gap:4px 0;flex-wrap:wrap;line-height:1.5}
 #meta span+span::before{content:"·";margin:0 7px;opacity:.6}
 #meta:empty{display:none}
+#meta .pn{margin-left:auto;font-weight:700;color:var(--fg);font-variant-numeric:tabular-nums}
+#meta .pn::before{content:none}
+#prog{position:absolute;left:0;right:0;bottom:-1px;height:3px;background:var(--line);overflow:hidden}
+#prog i{position:absolute;top:0;bottom:0;width:0;transition:width .25s ease-out}
+#pgGood{left:0;background:var(--good)}
+#pgBad{right:0;background:var(--bad)}
 
 /* ---------- 词卡 ---------- */
 main{margin:0;padding:6px 0 calc(70px + env(safe-area-inset-bottom))}
@@ -145,6 +151,7 @@ dialog::backdrop{background:#0008}
     <button id="btnMore" title="更多">⋯</button>
   </div>
   <div id="meta"></div>
+  <div id="prog"><i id="pgGood"></i><i id="pgBad"></i></div>
 </header>
 <main id="list"></main>
 <div id="manage" hidden>
@@ -204,7 +211,7 @@ dialog::backdrop{background:#0008}
 
 <script>
 "use strict";
-const APP_VER = "2.7";
+const APP_VER = "2.8";
 const APP_BUILT = "2026-11-19";
 const DATA_URL = "words.json";
 const K_DATA = "ci.data", K_SETS = "ci.sets", K_PREFS = "ci.prefs", K_SEQ = "ci.seq", K_REV = "ci.rev";
@@ -268,9 +275,13 @@ function renderMeta() {
     const on = document.querySelectorAll(".r.on").length;
     const bad = document.querySelectorAll(".r.bad").length;
     const good = document.querySelectorAll(".r.good").length;
-    s += `<span>本组 ${set.words.length} 词 · 点开 ${on} · 错 ${bad} · 对 ${good}</span>`;
+    s += `<span>点开 ${on} · 错 ${bad} · 对 ${good}</span><span class="pn">${bad + good}/${set.words.length}</span>`;
   }
   m.innerHTML = s;
+  const tot = set ? set.words.length : 0;
+  const pct = x => tot ? (x / tot * 100) + "%" : "0";
+  $("pgGood").style.width = set ? pct(document.querySelectorAll(".r.good").length) : "0";
+  $("pgBad").style.width = set ? pct(document.querySelectorAll(".r.bad").length) : "0";
 }
 
 /* ---------- 抽词算法 ---------- */
@@ -478,7 +489,7 @@ function render() {
         el.classList.remove("bad", "good");
         el.querySelectorAll(".mk button").forEach(x => x.classList.remove("on"));
         if (now === -1) { el.classList.add("bad"); el.querySelector(".mk .no").classList.add("on"); }
-        if (now === 1) { el.classList.add("good"); el.querySelector(".mk .yes").classList.add("on"); }
+        if (now === 1) { el.classList.add("good", "on"); el.querySelector(".mk .yes").classList.add("on"); }
         b.classList.remove("hit"); void b.offsetWidth; b.classList.add("hit");
         renderMeta();
       });
