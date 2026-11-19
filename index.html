@@ -36,7 +36,6 @@ header{position:sticky;top:0;z-index:20;background:var(--bar);
   -webkit-backdrop-filter:saturate(1.4) blur(10px);backdrop-filter:saturate(1.4) blur(10px);
   border-bottom:1px solid var(--line);
   padding:calc(8px + env(safe-area-inset-top)) 10px 8px}
-header>div{max-width:640px;margin-left:auto;margin-right:auto}
 .l1{display:flex;gap:8px;align-items:center}
 .l2{display:flex;gap:6px;align-items:center;margin-top:8px}
 .l2 button{flex:1 1 0;min-width:0;padding:10px 4px;font-size:15px;background:var(--card)}
@@ -58,9 +57,9 @@ html[data-theme="dark"] #btnDraw{color:#0f1720}
 #meta:empty{display:none}
 
 /* ---------- 词卡 ---------- */
-main{max-width:640px;margin:0 auto;padding:6px 0 calc(70px + env(safe-area-inset-bottom))}
+main{margin:0;padding:6px 0 calc(70px + env(safe-area-inset-bottom))}
 .r{display:grid;grid-template-columns:1fr auto;column-gap:10px;align-items:center;
-  margin:7px 8px;padding:10px 10px 10px 14px;background:var(--card);border:1px solid var(--line);
+  margin:6px 6px;padding:10px 10px 10px 14px;background:var(--card);border:1px solid var(--line);
   border-radius:14px;box-shadow:var(--shadow);cursor:pointer;position:relative;overflow:hidden;
   transition:background .12s,border-color .12s}
 .r::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:transparent;transition:background .12s}
@@ -85,13 +84,13 @@ html[data-theme="dark"] .mk button.on{color:#12161c}
 .r.bad .w{color:var(--bad)}
 .r.good::before{background:var(--good)}
 .r.good .w{color:var(--good)}
-body.big .r{margin:6px 5px;padding:8px 8px 8px 12px}
+body.big .r{margin:5px 4px;padding:8px 8px 8px 12px}
 body.big .m{margin-top:6px;line-height:1.35}
 .empty{padding:56px 24px;text-align:center;color:var(--dim);font-size:15px;line-height:2}
 
 /* ---------- 弹窗：底部面板 ---------- */
 dialog{border:none;padding:0;background:var(--card);color:var(--fg);
-  width:100%;max-width:640px;margin:auto auto 0;border-radius:20px 20px 0 0;
+  width:100%;max-width:100%;margin:auto 0 0;border-radius:20px 20px 0 0;
   max-height:88vh;overflow-y:auto;box-shadow:0 -6px 30px rgba(0,0,0,.18)}
 dialog[open]{animation:up .2s ease-out}
 @keyframes up{from{transform:translateY(40px);opacity:.4}to{transform:none;opacity:1}}
@@ -109,7 +108,6 @@ dialog::backdrop{background:#0008}
 
 /* ---------- 管理页 ---------- */
 #manage{position:fixed;inset:0;z-index:40;background:var(--bg);overflow-y:auto;padding-bottom:40px}
-#manage>*{max-width:640px;margin-left:auto;margin-right:auto}
 .mbar{display:flex;align-items:center;gap:8px;padding:calc(10px + env(safe-area-inset-top)) 12px 10px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bar)}
 .mbar b{flex:1;font-size:16px}
 .mact{display:flex;gap:6px;padding:10px 12px;flex-wrap:wrap}
@@ -143,7 +141,7 @@ dialog::backdrop{background:#0008}
     <button id="btnFsMinus" title="字号变小">A−</button>
     <button id="btnFsPlus" title="字号变大">A+</button>
     <button id="btnAll" title="全部显示/隐藏">全显</button>
-    <button id="btnTheme" title="深浅色">◐</button>
+    <button id="btnRule" title="本次抽词规则">规则</button>
     <button id="btnMore" title="更多">⋯</button>
   </div>
   <div id="meta"></div>
@@ -168,7 +166,7 @@ dialog::backdrop{background:#0008}
     <div class="row">
       <button id="btnUpd" class="pri" title="重新拉取词表">更新词表</button>
       <button id="btnBad" class="pri" title="复制本组错词">复制错词</button>
-      <button id="btnRule" class="pri" title="本次抽词规则">抽词规则</button>
+      <button id="btnTheme" class="pri" title="深浅色">◐ 深浅色</button>
     </div>
     <h4>导出与复制</h4>
     <div class="row">
@@ -206,7 +204,7 @@ dialog::backdrop{background:#0008}
 
 <script>
 "use strict";
-const APP_VER = "2.6";
+const APP_VER = "2.7";
 const APP_BUILT = "2026-11-19";
 const DATA_URL = "words.json";
 const K_DATA = "ci.data", K_SETS = "ci.sets", K_PREFS = "ci.prefs", K_SEQ = "ci.seq", K_REV = "ci.rev";
