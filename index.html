@@ -72,6 +72,7 @@ main{margin:0;padding:6px 0 calc(70px + env(safe-area-inset-bottom))}
 .w{grid-area:1/1;min-width:0;font-size:calc(var(--fs)*1px);font-weight:650;letter-spacing:.2px;word-break:break-word;line-height:1.2}
 .m{grid-area:2/1/3/3;visibility:hidden;font-size:calc(var(--fs)*0.55px);line-height:1.45;color:var(--mean);
   min-height:calc(var(--fs)*0.55px*1.45);margin-top:6px;padding-left:10px;border-left:3px solid transparent;pointer-events:none}
+.extra-star{font-size:.48em;vertical-align:super;margin-left:.08em;color:var(--acc);line-height:0}
 .r.on .m{visibility:visible;border-left-color:var(--acc)}
 .r.on .w{color:var(--acc)}
 .r.on{border-color:var(--accsoft)}
@@ -211,9 +212,10 @@ dialog::backdrop{background:#0008}
 
 <script>
 "use strict";
-const APP_VER = "2.8";
-const APP_BUILT = "2026-11-19";
+const APP_VER = "2.9";
+const APP_BUILT = "2026-11-21";
 const DATA_URL = "words.json";
+const RELATED_URL = "related.json", K_RELATED = "ci.related";
 const K_DATA = "ci.data", K_SETS = "ci.sets", K_PREFS = "ci.prefs", K_SEQ = "ci.seq", K_REV = "ci.rev";
 const $ = id => document.getElementById(id);
 
@@ -228,8 +230,37 @@ let DATA = (store.get(K_DATA, null) || {}).payload || null;
 let SETS = store.get(K_SETS, {});      // "2026-11-04|1" -> {date,n,target,words:[...]}
 let PREFS = Object.assign({ vib: 15 }, store.get(K_PREFS, { fs: 26, theme: "light" }));
 function buzz(ms) { try { const v = (ms === undefined ? (+PREFS.vib || 0) : ms); if (v > 0 && navigator.vibrate) navigator.vibrate(v); } catch (e) {} }
+let RELATED = store.get(K_RELATED, null);
+let WORD_INDEX = new Map(), MAIN_WORDS = new Set();
 let curKey = null;                      // 当前查看的组
 let REV = store.get(K_REV, {});          // 每个词的复习状态 {g:间隔天数, d:下次到期, s:连对, l:记错, n:复习次数}
+
+/* 关联资料与历史快照只补充查词，不合并到母本 DATA.words。 */
+function refreshWordIndex() {
+  WORD_INDEX = new Map(); MAIN_WORDS = new Set();
+  ((RELATED && RELATED.words) || []).forEach(o => {
+    if (!o.anchorOnly || ((DATA && DATA.words) || []).some(x => x.w === o.w)) WORD_INDEX.set(o.w, o);
+  });
+  Object.keys(SETS).forEach(k => {
+    const extra = SETS[k].extra || {};
+    Object.keys(extra).forEach(w => { if (!WORD_INDEX.has(w)) WORD_INDEX.set(w, extra[w]); });
+  });
+  ((DATA && DATA.words) || []).forEach(o => { WORD_INDEX.set(o.w, o); MAIN_WORDS.add(o.w); });
+}
+function wordIndex() { return WORD_INDEX; }
+function allReviewWords() { return Array.from(WORD_INDEX.values()); }
+function wordInSet(w, s) { return (s && s.extra && s.extra[w] && !MAIN_WORDS.has(w)) ? s.extra[w] : WORD_INDEX.get(w); }
+function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+async function loadRelated() {
+  try {
+    const r = await fetch(RELATED_URL, { cache: "no-cache" });
+    if (!r.ok) return false;
+    const data = await r.json();
+    if (!Array.isArray(data.words) || !Array.isArray(data.groups)) return false;
+    RELATED = data; store.set(K_RELATED, RELATED); return true;
+  } catch (e) { return false; }
+}
+refreshWordIndex();
 
 /* ---------- 小工具 ---------- */
 let toastTimer = null;
@@ -259,7 +290,9 @@ async function loadData(force) {
   } catch (e) { /* 离线就用缓存 */ }
   if (!ok && DATA) toast("离线：用手机缓存里的词表");
   if (!ok && !DATA) { $("list").innerHTML = '<div class="empty">词表没加载到<br>连一次网再点「更新」</div>'; }
-  renderMeta();
+  await loadRelated();
+  refreshWordIndex();
+  render();
   return ok;
 }
 
@@ -323,12 +356,12 @@ function gap0eff(o) {
 }
 function isGrad(w) { const r = REV[w]; return !!r && (r.g || 0) >= 90; }
 function isFuture(w, day) { const r = REV[w]; return !!r && r.d > day; }   // 已排好下次日期，还没到期
-function dueCount(day) { return DATA ? DATA.words.filter(w => REV[w.w] && REV[w.w].d <= day && !isGrad(w.w)).length : 0; }
-function gradCount() { return DATA ? DATA.words.filter(w => isGrad(w.w)).length : 0; }
+function dueCount(day) { return DATA ? allReviewWords().filter(w => REV[w.w] && REV[w.w].d <= day && !isGrad(w.w)).length : 0; }
+function gradCount() { return DATA ? allReviewWords().filter(w => isGrad(w.w)).length : 0; }
 
 /* 抽到时：默认按「模糊」处理，间隔不放大 */
 function scheduleAfterDraw(w, day) {
-  const o = DATA.words.find(x => x.w === w); if (!o) return;
+  const o = WORD_INDEX.get(w); if (!o) return;
   const r = REV[w] || { g: 0, s: 0, l: 0, n: 0 };
   if (!r.g) r.g = gap0eff(o);
   r.d = addD(day, Math.max(2, Math.round(r.g / 2)));
@@ -337,7 +370,7 @@ function scheduleAfterDraw(w, day) {
 }
 /* 标记：✓ 间隔放大；✗ 打回 2 天；再点取消 = 回到模糊 */
 function applyMark(w, kind, day) {
-  const o = DATA.words.find(x => x.w === w); if (!o) return;
+  const o = WORD_INDEX.get(w); if (!o) return;
   const r = REV[w] || { g: gap0eff(o), s: 0, l: 0, n: 1 };
   if (kind === 1) {
     r.s = (r.s || 0) + 1;
@@ -353,8 +386,10 @@ function applyMark(w, kind, day) {
 }
 
 function buildPick(target, seedStr, dateStr, drawnToday) {
-  const byW = new Map(); DATA.words.forEach(w => byW.set(w.w, w));
+  const byW = wordIndex();
   const used = new Set(), out = [], tags = {};
+  let relatedCount = 0;
+  const relatedPerGroup = new Map();
   const drawn = new Set(drawnToday || []);
   let skip = true;
   const push = (w, tag) => {
@@ -374,26 +409,48 @@ function buildPick(target, seedStr, dateStr, drawnToday) {
 
     // B 到期复习：到期日已到（含逾期），错得越多越靠前
     if (out.length < T) {
-      const due = DATA.words.filter(w => REV[w.w] && REV[w.w].d <= dateStr && !isGrad(w.w))
+      const due = allReviewWords().filter(w => REV[w.w] && REV[w.w].d <= dateStr && !isGrad(w.w))
         .sort((a, b) => (dayDiff(dateStr, REV[b.w].d) - dayDiff(dateStr, REV[a.w].d)) || (b.c - a.c) || cmpFreq(a, b));
       take(due, Math.round(T * 0.32), 0, "到期");
     }
 
-    // C 形近连坐：今日错词所在族优先，最多 10 个
-    if (out.length < T) {
+    // C 词根/词缀/形近连坐：只扩展与母本词有联系的组，保留10词总配额。
+    if (out.length < T && relatedCount < 10) {
+      const latest = new Set(A.map(w => w.w));
+      const seeds = new Set(out.filter(w => MAIN_WORDS.has(w)));
+      const groups = ((RELATED && RELATED.groups) || []).filter(g =>
+        g.words.some(w => MAIN_WORDS.has(w)) && g.words.every(w => byW.has(w)));
+      const ranked = groups.map(g => ({g, rank: g.words.some(w => latest.has(w)) ? 0 : g.words.some(w => seeds.has(w)) ? 1 : 2, tie: rnd()}))
+        .sort((a, b) => a.rank - b.rank || a.tie - b.tie);
+      ranked.forEach(entry => {
+        if (relatedCount >= 10 || out.length >= T) return;
+        const g = entry.g, key = "new:" + g.id;
+        let added = relatedPerGroup.get(key) || 0;
+        const mem = g.words.map(w => byW.get(w)).filter(o => !isGrad(o.w) && !isFuture(o.w, dateStr) && !used.has(o.w));
+        // 同等条件先给词表外成员；同类候选按当天种子轮转。
+        const choices = mem.map(o => ({o, ext: MAIN_WORDS.has(o.w) ? 1 : 0, tie: rnd()}))
+          .sort((a, b) => a.ext - b.ext || a.tie - b.tie);
+        choices.forEach(x => {
+          if (added < 2 && relatedCount < 10 && push(x.o, "形近")) { added++; relatedCount++; }
+        });
+        relatedPerGroup.set(key, added);
+      });
+      // 原有手工词族继续补足，避免移除用户原来的分组。
       const prio = [...new Set(A.map(w => w.fam).filter(Boolean))];
       const all = [...new Set(DATA.words.filter(w => w.fam).map(w => w.fam))].sort();
       const order = prio.concat(all.filter(f => prio.indexOf(f) < 0));
       const famMap = new Map();
       DATA.words.forEach(w => { if (!w.fam) return; if (!famMap.has(w.fam)) famMap.set(w.fam, []); famMap.get(w.fam).push(w); });
-      let got = 0;
       for (const f of order) {
-        if (got >= 10 || out.length >= T) break;
+        if (relatedCount >= 10 || out.length >= T) break;
         const mem = (famMap.get(f) || []).filter(x => !isGrad(x.w) && !isFuture(x.w, dateStr)).slice().sort(cmpCnt);
         if (!mem.length) continue;
-        const st = Math.floor(rnd() * mem.length);
-        let add = 0;
-        for (let i = 0; i < mem.length && add < 2; i++) { if (push(mem[(st + i) % mem.length], "形近")) { add++; got++; } }
+        const st = Math.floor(rnd() * mem.length), key = "old:" + f;
+        let added = relatedPerGroup.get(key) || 0;
+        for (let i = 0; i < mem.length && added < 2 && relatedCount < 10; i++) {
+          if (push(mem[(st + i) % mem.length], "形近")) { added++; relatedCount++; }
+        }
+        relatedPerGroup.set(key, added);
       }
     }
 
@@ -436,7 +493,9 @@ function draw() {
   const res = buildPick(target, key + "#" + target, day, drawnToday);
   res.words.forEach(w => scheduleAfterDraw(w, day));
   store.set(K_REV, REV);
-  SETS[key] = { date: day, n: nn, target, words: res.words, tags: res.tags, ts: Date.now() };
+  const extra = {};
+  res.words.forEach(w => { if (!MAIN_WORDS.has(w) && WORD_INDEX.has(w)) extra[w] = Object.assign({}, WORD_INDEX.get(w)); });
+  SETS[key] = { date: day, n: nn, target, words: res.words, tags: res.tags, extra, ts: Date.now() };
   seq[day] = nn; store.set(K_SEQ, seq); store.set(K_SETS, SETS);
   curKey = key;
   fillSel();
@@ -459,15 +518,16 @@ function render() {
   const box = $("list");
   const set = curKey && SETS[curKey];
   if (!set) { box.innerHTML = '<div class="empty">选个日期，或者点「抽词」<br>抽出来的词会自动存在手机上</div>'; renderMeta(); return; }
-  const byW = new Map(); ((DATA && DATA.words) || []).forEach(w => byW.set(w.w, w));
+  const byW = wordIndex();
   const marks = set.marks || {};
   const html = set.words.map(w => {
-    const o = byW.get(w);
+    const o = wordInSet(w, set);
+    const external = !!o && !MAIN_WORDS.has(w);
     const mean = o ? ((o.p || "") + (o.d || "")) : "（词表里没有这个词）";
     const m = marks[w] || 0;
     const cls = "r" + (m === -1 ? " bad" : m === 1 ? " good" : "");
     return '<div class="' + cls + '" data-w="' + w + '">' +
-      '<div class="w">' + w + '</div><div class="m">' + mean + '</div>' +
+      '<div class="w">' + escapeHtml(w) + (external ? '<sup class="extra-star" title="大纲资料补充词，未收入个人词表" aria-label="词表外补充词">*</sup>' : '') + '</div><div class="m">' + escapeHtml(mean) + '</div>' +
       '<div class="mk"><button class="no' + (m === -1 ? " on" : "") + '" data-k="-1">✗</button>' +
       '<button class="yes' + (m === 1 ? " on" : "") + '" data-k="1">✓</button></div></div>';
   }).join("");
@@ -578,8 +638,7 @@ function badWords(ofSet) {
   return s.words.filter(w => m[w] === -1);
 }
 function setToText(s) {
-  const byW = new Map(); ((DATA && DATA.words) || []).forEach(w => byW.set(w.w, w));
-  return s.words.map(w => { const o = byW.get(w); return w + "\t" + (o ? (o.p || "") + (o.d || "") : ""); }).join("\n");
+  return s.words.map(w => { const o = wordInSet(w, s); return w + (o && !MAIN_WORDS.has(w) ? "*" : "") + "\t" + (o ? (o.p || "") + (o.d || "") : ""); }).join("\n");
 }
 function curSet() { return curKey && SETS[curKey] ? SETS[curKey] : null; }
 
@@ -628,7 +687,7 @@ $("btnRule").addEventListener("click", () => {
   const name = {
     "今": "今日新错词（全量，考频降序）",
     "到期": "到期复习（按间隔到期，错多者优先）",
-    "形近": "形近连坐（今日错词所在族优先，约 10 个）",
+    "形近": "词根/词缀/形近连坐（含大纲资料补充词，最多 10 个）",
     "黑洞": "黑洞补漏（错≥3 且考频≤2，4 个）",
     "高频": "高频核心（考频≥20，轮转 8 个）",
     "补位": "补位（按考频补足）"
@@ -644,7 +703,7 @@ $("btnRule").addEventListener("click", () => {
     "<b>怎么挑的</b><br>" + [
       "1. 今日新错词：最近一次入账的错词全部进来，按考研考频从高到低——刚错的当天必须过。",
       "2. 到期复习：每个词都有自己的「下次到期日」，到期的才进来；按逾期天数排序，拖得最久的先补，最多占本次三成。",
-      "3. 形近连坐：先抽今日错词所在词族里的其他成员，同族最多 2 个，上限 10 个。",
+      "3. 词根/词缀/形近连坐：用2200资料中关系明确的分组，今日错词、到期词所在组优先；同组最多2个，总共最多10个，占本组目标词数。词表外成员优先，标 *；原手工词族用于补足。",
       "4. 黑洞补漏：错≥3 但考频≤2 的词，取 4 个。",
       "5. 高频核心：考频≥20 的词轮转 8 个。",
       "6. 补位：不够目标数量就按考频补；同一个词只出现一次。",
@@ -654,11 +713,14 @@ $("btnRule").addEventListener("click", () => {
       "· 第一次见面：按错误次数定间隔——错≥6 → 2 天，错5 → 3 天，错4 → 5 天，错3 → 7 天，错2 → 10 天，错1 → 14 天。",
       "· 老账修正：近 30 天没再错的词，首次间隔放大一倍（最多 14 天）；近 30 天还在错的，收紧 1 天。",
       "· 点 ✓（记得）：间隔 ×1.9，逐次拉长，最长 90 天。",
-      "· 点 ✗（忘了）：间隔打回 2 天，明天再来。",
+      "· 点 ✗（忘了）：间隔打回 2 天，2 天后到期。",
       "· 什么都不点：当「模糊」处理，间隔不放大，过约一半间隔再出现。",
       "· 错了 5 次以上、连对 3 次的词判为「熟知」，排到 90 天以后，不再天天占量。"
     ].join("<br>") +
     "<br><br><b>当前状态</b> 到期 " + dueCount(d0) + " 词 · 熟知 " + gradCount() + " 词 · 已记录复习 " + Object.keys(REV).length + " 词" +
+    "<br><b>* 补充词</b> 不在个人词表中，来自2200资料与2024大纲整理表的交集；不计入母本词数与出错次数，✓/✗与到期复习照常保存在本机。若以后收入母本，自动取消星号并沿用进度。" +
+    "<br><b>资料范围</b> 已跳过待核词头；这份范围数据尚未与2027官方附录逐词核验。" +
+    "<br><b>数据来源</b> NETEMVocabulary（exam-data），CC BY-NC-SA 4.0；派生补充词数据沿用同许可。" +
     "<br><b>标记</b> 每行右边 ✗ 记错、✓ 记对，顶部「复制错词」一键复制本组错词" +
     "<br><b>版本</b> 网站 v" + APP_VER + "（" + cn(APP_BUILT) + "）<br><b>字号</b> " + PREFS.fs + "px　<b>词表</b> " +
     (DATA ? DATA.words.length + " 词，更新于 " + cn(DATA.updated) : "未加载");
@@ -722,7 +784,7 @@ $("btnCopyToday").addEventListener("click", () => {
   copyText(out.join("\n"));
 });
 function doBackup() {
-  download("抽词备份-" + todayStr() + ".json", JSON.stringify({ v: 2, ts: Date.now(), prefs: PREFS, sets: SETS, rev: REV }, null, 1), "application/json");
+  download("抽词备份-" + todayStr() + ".json", JSON.stringify({ v: 3, ts: Date.now(), prefs: PREFS, sets: SETS, rev: REV }, null, 1), "application/json");
   toast("已备份");
 }
 $("btnBackup").addEventListener("click", doBackup);
@@ -741,7 +803,7 @@ $("fileIn").addEventListener("change", e => {
       store.set(K_SETS, SETS);
       if (o.rev) { Object.keys(o.rev).forEach(k => { if (!REV[k]) REV[k] = o.rev[k]; }); store.set(K_REV, REV); }
       if (o.prefs) { PREFS = Object.assign(PREFS, o.prefs); applyPrefs(); store.set(K_PREFS, PREFS); }
-      fillSel(); render(); toast("恢复 " + n + " 组");
+      refreshWordIndex(); fillSel(); render(); toast("恢复 " + n + " 组");
     } catch (err) { toast("恢复失败：" + err.message); }
     e.target.value = "";
   };
@@ -749,7 +811,7 @@ $("fileIn").addEventListener("change", e => {
 });
 function doClear() {
   if (!confirm("清空手机上所有抽词记录和复习进度？词表缓存会保留。")) return;
-  SETS = {}; REV = {}; store.set(K_SETS, {}); store.set(K_REV, {}); store.del(K_SEQ); curKey = null; fillSel(); render();
+  SETS = {}; REV = {}; store.set(K_SETS, {}); store.set(K_REV, {}); store.del(K_SEQ); curKey = null; refreshWordIndex(); fillSel(); render();
   if (!$("manage").hidden) renderManage();
   toast("已清空");
 }

@@ -1,6 +1,6 @@
 /* 抽词复习 · Service Worker（离线缓存） */
-const VER = "ci-2.8";
-const CORE = ["./", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./icon-maskable.png"];
+const VER = "ci-2.9";
+const CORE = ["./", "./related.json", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./icon-maskable.png"];
 
 self.addEventListener("install", e => {
   e.waitUntil(
